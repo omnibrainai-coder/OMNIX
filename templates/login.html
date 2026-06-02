@@ -1,0 +1,183 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+<title>SHADOW</title>
+
+<style>
+
+body{
+margin:0;
+padding:0;
+height:100vh;
+font-family:Arial,sans-serif;
+
+background:
+radial-gradient(circle at top,
+#8b5cf6 0%,
+#1a0b2e 25%,
+#090909 55%,
+#000000 100%);
+
+display:flex;
+flex-direction:column;
+justify-content:center;
+align-items:center;
+overflow:hidden;
+}
+
+.logo{
+font-size:70px;
+font-weight:900;
+letter-spacing:8px;
+color:white;
+
+text-shadow:
+0 0 15px #a855f7,
+0 0 40px #9333ea;
+
+margin-bottom:10px;
+}
+
+.tag{
+color:#aaa;
+font-size:14px;
+margin-bottom:20px;
+}
+
+.container{
+width:90%;
+max-width:430px;
+
+padding:30px;
+
+background:rgba(20,20,20,.45);
+
+border-radius:30px;
+
+backdrop-filter:blur(18px);
+
+border:1px solid rgba(255,255,255,.08);
+
+box-shadow:
+0 0 40px rgba(168,85,247,.20);
+
+text-align:center;
+}
+
+input{
+width:100%;
+height:58px;
+
+margin-top:12px;
+
+border:none;
+outline:none;
+
+border-radius:14px;
+
+background:#0d0d0d;
+
+color:white;
+
+padding-left:15px;
+box-sizing:border-box;
+}
+
+.forgot{
+text-align:right;
+color:#b86cff;
+font-size:13px;
+margin-top:10px;
+}
+
+.btn{
+width:100%;
+height:58px;
+
+margin-top:15px;
+
+border:none;
+border-radius:14px;
+
+font-size:17px;
+font-weight:bold;
+
+color:white;
+
+background:
+linear-gradient(
+90deg,
+#7c3aed,
+#d946ef);
+
+}
+
+.create{
+background:transparent;
+border:1px solid #9333ea;
+}
+
+.power{
+margin-top:25px;
+font-size:12px;
+color:#888;
+}
+
+.omni{
+font-size:32px;
+font-weight:900;
+letter-spacing:4px;
+color:white;
+
+text-shadow:
+0 0 10px #a855f7;
+}
+
+</style>
+</head>
+
+<body>
+
+<div class="logo">
+SHADOW
+</div>
+
+<div class="tag">
+Private Network
+</div>
+
+<div class="container">
+
+<input
+type="text"
+placeholder="Mobile Number / Username / Email">
+
+<input
+type="password"
+placeholder="Password">
+
+<div class="forgot">
+Forget Password?
+</div>
+
+<button class="btn">
+ENTER SHADOW
+</button>
+
+<button class="btn create">
+CREATE NEW ACCOUNT
+</button>
+
+</div>
+
+<div class="power">
+Powered by
+</div>
+
+<div class="omni">
+OMNI.X
+</div>
+
+</body>
+</html>
