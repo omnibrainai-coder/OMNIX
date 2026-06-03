@@ -1,25 +1,28 @@
 from fastapi import FastAPI
 from fastapi.responses import FileResponse
 
-from database import Base, engine
-import models
-
-Base.metadata.create_all(bind=engine)
-
 app = FastAPI()
 
 @app.get("/")
 async def root():
     return FileResponse("templates/login.html")
 
-@app.get("/login")
-async def login():
-    return FileResponse("templates/login.html")
-
-@app.get("/signup")
-async def signup():
-    return FileResponse("templates/signup.html")
-
 @app.get("/home")
 async def home():
     return FileResponse("templates/home.html")
+
+@app.get("/search")
+async def search():
+    return FileResponse("templates/search.html")
+
+@app.get("/create")
+async def create():
+    return FileResponse("templates/create.html")
+
+@app.get("/chat")
+async def chat():
+    return FileResponse("templates/chat.html")
+
+@app.get("/profile")
+async def profile():
+    return FileResponse("templates/profile.html")
