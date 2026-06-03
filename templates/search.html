@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0">
+  <title>SHADOW — Search</title>
+  <link rel="stylesheet" href="/static/style.css">
+  <style>
+    .tags-scroll {
+      display: flex;
+      gap: 8px;
+      padding: 0 16px 12px;
+      overflow-x: auto;
+      scrollbar-width: none;
+    }
+    .tags-scroll::-webkit-scrollbar { display: none; }
+
+    .tag-btn {
+      flex-shrink: 0;
+      padding: 6px 14px;
+      border-radius: 100px;
+      border: 1px solid var(--border);
+      background: transparent;
+      color: var(--text-secondary);
+      font-family: var(--font-mono);
+      font-size: 0.68rem;
+      letter-spacing: 0.06em;
+      cursor: pointer;
+      transition: all var(--transition);
+      white-space: nowrap;
+    }
+    .tag-btn:hover, .tag-btn.active {
+      border-color: var(--accent);
+      color: var(--accent);
+      background: var(--accent-dim);
+    }
+
+    .grid-2 {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      padding: 0 16px;
+    }
+
+    .grid-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-md);
+      overflow: hidden;
+      cursor: pointer;
+      transition: border-color var(--transition), transform var(--transition);
+      text-decoration: none;
+    }
+    .grid-card:hover {
+      border-color: var(--border-hover);
+      transform: scale(1.02);
+    }
+
+    .grid-card__img {
+      width: 100%;
+      aspect-ratio: 1;
+      background: linear-gradient(135deg, var(--bg-surface), var(--bg-input));
+      overflow: hidden;
+    }
+    .grid-card__img img { width: 100%; height: 100%; object-fit: cover; }
+
+    .grid-card__label {
+      padding: 8px 10px;
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-secondary);
+      letter-spacing: 0.06em;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .user-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background var(--transition);
+    }
+    .user-row:hover { background: var(--bg-card); }
+
+    .user-row__info { flex: 1; }
+    .user-row__name {
+      font-family: var(--font-head);
+      font-weight: 700;
+      font-size: 0.95rem;
+      letter-spacing: 0.04em;
+      color: var(--text-primary);
+    }
+    .user-row__handle {
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      margin-top: 2px;
+    }
+
+    .follow-btn {
+      padding: 6px 14px;
+      border-radius: 100px;
+      border: 1px solid var(--border-active);
+      background: transparent;
+      color: var(--accent);
+      font-family: var(--font-mono);
+      font-size: 0.65rem;
+      letter-spacing: 0.08em;
+      cursor: pointer;
+      transition: all var(--transition);
+    }
+    .follow-btn:hover { background: var(--accent-dim); }
+    .follow-btn.following {
+      border-color: var(--border);
+      color: var(--text-muted);
+    }
+
+    .trending-row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      cursor: pointer;
+      transition: background var(--transition);
+    }
+    .trending-row:hover { background: var(--bg-card); }
+
+    .trending-rank {
+      font-family: var(--font-mono);
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      width: 24px;
+      text-align: center;
+    }
+
+    .trending-tag {
+      font-family: var(--font-head);
+      font-weight: 700;
+      font-size: 0.95rem;
+      letter-spacing: 0.05em;
+      color: var(--text-primary);
+    }
+
+    .trending-count {
+      font-family: var(--font-mono);
+      font-size: 0.62rem;
+      color: var(--text-muted);
+      letter-spacing: 0.06em;
+      margin-top: 2px;
+    }
+
+    .trending-row .chip { margin-left: auto; }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <div class="scan-overlay"></div>
+
+    <header class="header">
+      <div class="header__title">// SEARCH</div>
+    </header>
+
+    <!-- Search input -->
+    <div class="search-bar" style="padding:14px 16px 8px;">
+      <svg class="search-bar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+      </svg>
+      <input type="text" id="searchInput" placeholder="Search nodes, tags, content..." autofocus>
+    </div>
+
+    <!-- Category filters -->
+    <div class="tags-scroll">
+      <button class="tag-btn active" onclick="setFilter(this)">ALL</button>
+      <button class="tag-btn" onclick="setFilter(this)">PEOPLE</button>
+      <button class="tag-btn" onclick="setFilter(this)">POSTS</button>
+      <button class="tag-btn" onclick="setFilter(this)">TAGS</button>
+      <button class="tag-btn" onclick="setFilter(this)">MEDIA</button>
+      <button class="tag-btn" onclick="setFilter(this)">LIVE</button>
+    </div>
+
+    <!-- Trending tags -->
+    <div class="section-header">
+      <span class="section-title">// Trending Nodes</span>
+    </div>
+
+    <div style="margin-bottom:8px;">
+      <div class="trending-row anim-stagger">
+        <div class="trending-rank">01</div>
+        <div style="flex:1;">
+          <div class="trending-tag">#ShadowNet</div>
+          <div class="trending-count">12.4K TRANSMISSIONS</div>
+        </div>
+        <div class="chip chip--accent">HOT</div>
+      </div>
+      <div class="trending-row anim-stagger">
+        <div class="trending-rank">02</div>
+        <div style="flex:1;">
+          <div class="trending-tag">#OMNIX</div>
+          <div class="trending-count">8.9K TRANSMISSIONS</div>
+        </div>
+        <div class="chip chip--success">NEW</div>
+      </div>
+      <div class="trending-row anim-stagger">
+        <div class="trending-rank">03</div>
+        <div style="flex:1;">
+          <div class="trending-tag">#CipherGrid</div>
+          <div class="trending-count">5.2K TRANSMISSIONS</div>
+        </div>
+        <div class="chip">TREND</div>
+      </div>
+      <div class="trending-row anim-stagger">
+        <div class="trending-rank">04</div>
+        <div style="flex:1;">
+          <div class="trending-tag">#DarkNet</div>
+          <div class="trending-count">3.8K TRANSMISSIONS</div>
+        </div>
+        <div class="chip">TREND</div>
+      </div>
+    </div>
+
+    <!-- Suggested people -->
+    <div class="section-header" style="margin-top:8px;">
+      <span class="section-title">// Suggested Nodes</span>
+    </div>
+
+    <div>
+      <div class="user-row anim-stagger">
+        <div class="avatar avatar--md">Z</div>
+        <div class="user-row__info">
+          <div class="user-row__name">Zara_X</div>
+          <div class="user-row__handle">@zara_x · 14.2K followers</div>
+        </div>
+        <button class="follow-btn" onclick="toggleFollow(this)">FOLLOW</button>
+      </div>
+      <div class="user-row anim-stagger">
+        <div class="avatar avatar--md" style="background:linear-gradient(135deg,#002a1a,#00ff9d);color:#000;">K</div>
+        <div class="user-row__info">
+          <div class="user-row__name">Kai_Zero</div>
+          <div class="user-row__handle">@kai_0 · 9.8K followers</div>
+        </div>
+        <button class="follow-btn" onclick="toggleFollow(this)">FOLLOW</button>
+      </div>
+      <div class="user-row anim-stagger">
+        <div class="avatar avatar--md" style="background:linear-gradient(135deg,#1a1a00,#ffe600);color:#000;">N</div>
+        <div class="user-row__info">
+          <div class="user-row__name">Nova_AI</div>
+          <div class="user-row__handle">@nova_ai · 22.1K followers</div>
+        </div>
+        <button class="follow-btn" onclick="toggleFollow(this)">FOLLOW</button>
+      </div>
+    </div>
+
+    <!-- Explore grid -->
+    <div class="section-header" style="margin-top:16px;">
+      <span class="section-title">// Explore</span>
+    </div>
+
+    <div class="grid-2" style="margin-bottom:20px;">
+      <div class="grid-card anim-stagger">
+        <div class="grid-card__img"><img src="https://images.pexels.com/photos/3861969/pexels-photo-3861969.jpeg?auto=compress&cs=tinysrgb&w=400" alt="" loading="lazy"></div>
+        <div class="grid-card__label">@affan · 248 likes</div>
+      </div>
+      <div class="grid-card anim-stagger">
+        <div class="grid-card__img"><img src="https://images.pexels.com/photos/2007647/pexels-photo-2007647.jpeg?auto=compress&cs=tinysrgb&w=400" alt="" loading="lazy"></div>
+        <div class="grid-card__label">@omni.x · 1.2K likes</div>
+      </div>
+      <div class="grid-card anim-stagger">
+        <div class="grid-card__img"><img src="https://images.pexels.com/photos/1089438/pexels-photo-1089438.jpeg?auto=compress&cs=tinysrgb&w=400" alt="" loading="lazy"></div>
+        <div class="grid-card__label">@kai_0 · 312 likes</div>
+      </div>
+      <div class="grid-card anim-stagger">
+        <div class="grid-card__img"><img src="https://images.pexels.com/photos/1714208/pexels-photo-1714208.jpeg?auto=compress&cs=tinysrgb&w=400" alt="" loading="lazy"></div>
+        <div class="grid-card__label">@nova_ai · 891 likes</div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bottom Nav -->
+  <nav class="bottom-nav">
+    <a href="/home" class="nav-item">
+      <svg viewBox="0 0 24 24"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
+      <span>Home</span>
+    </a>
+    <a href="/search" class="nav-item">
+      <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+      <span>Search</span>
+    </a>
+    <a href="/create" class="nav-item">
+      <svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="16"/><line x1="8" y1="12" x2="16" y2="12"/></svg>
+      <span>Create</span>
+    </a>
+    <a href="/chat" class="nav-item">
+      <svg viewBox="0 0 24 24"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+      <span>Chat</span>
+    </a>
+    <a href="/profile" class="nav-item">
+      <svg viewBox="0 0 24 24"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+      <span>Profile</span>
+    </a>
+  </nav>
+
+  <script src="/static/app.js"></script>
+  <script>
+    function setFilter(btn) {
+      document.querySelectorAll('.tag-btn').forEach(b => b.classList.remove('active'));
+      btn.classList.add('active');
+    }
+    function toggleFollow(btn) {
+      const isFollowing = btn.classList.toggle('following');
+      btn.textContent = isFollowing ? 'FOLLOWING' : 'FOLLOW';
+      showToast(isFollowing ? 'NODE CONNECTED' : 'NODE DISCONNECTED');
+    }
+  </script>
+</body>
+</html>
