@@ -190,7 +190,7 @@
         <input class="input" type="password" placeholder="Repeat password" autocomplete="new-password">
       </div>
 
-      <button class="btn btn--primary" style="margin-top:6px;" onclick="showToast('CREATING NODE...')">
+      <button class="btn btn--primary" style="margin-top:6px;" onclick="handleSignup()">
         CREATE ACCOUNT
       </button>
 
@@ -210,5 +210,57 @@
   </div>
 
   <script src="/static/app.js"></script>
+  <script>
+    async function handleSignup() {
+      const inputs = document.querySelectorAll('.input');
+      let valid = true;
+      inputs.forEach(function(input) {
+        if (!input.value.trim()) {
+          valid = false;
+          input.style.borderColor = 'var(--error)';
+          setTimeout(function() { input.style.borderColor = ''; }, 2000);
+        }
+      });
+      if (!valid) {
+        showToast('ALL FIELDS REQUIRED');
+        return;
+      }
+      const passwords = document.querySelectorAll('input[type="password"]');
+      if (passwords[0].value !== passwords[1].value) {
+        showToast('PASSWORDS DO NOT MATCH');
+        passwords[1].style.borderColor = 'var(--error)';
+        setTimeout(function() { passwords[1].style.borderColor = ''; }, 2000);
+        return;
+      }
+      if (passwords[0].value.length < 8) {
+        showToast('PASSWORD MUST BE 8+ CHARACTERS');
+        return;
+      }
+      showToast('CREATING NODE...');
+      try {
+        const res = await fetch('/api/auth/signup', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            first_name: inputs[0].value.trim(),
+            last_name: inputs[1].value.trim(),
+            username: inputs[2].value.trim().replace('@', ''),
+            mobile: inputs[3].value.trim(),
+            email: inputs[4].value.trim(),
+            password: passwords[0].value
+          })
+        });
+        const data = await res.json();
+        if (data.success) {
+          showToast('NODE CREATED');
+          setTimeout(function() { window.location = '/'; }, 1000);
+        } else {
+          showToast(data.detail || 'REGISTRATION FAILED');
+        }
+      } catch (err) {
+        showToast('CONNECTION ERROR');
+      }
+    }
+  </script>
 </body>
 </html>

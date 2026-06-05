@@ -180,10 +180,10 @@
 
       <div class="link-row">
         <span></span>
-        <a href="#">Forgot password?</a>
+        <a href="#" onclick="showToast('FEATURE COMING SOON');return false;">Forgot password?</a>
       </div>
 
-      <button class="btn btn--primary" onclick="window.location='/home'">
+      <button class="btn btn--primary" onclick="handleLogin()">
         ENTER SHADOW
       </button>
 
@@ -207,5 +207,49 @@
   </div>
 
   <script src="/static/app.js"></script>
+  <script>
+    async function handleLogin() {
+      const identity = document.querySelector('input[autocomplete="username"]');
+      const password = document.querySelector('input[autocomplete="current-password"]');
+      let valid = true;
+      if (!identity.value.trim()) {
+        identity.style.borderColor = 'var(--error)';
+        setTimeout(function() { identity.style.borderColor = ''; }, 2000);
+        valid = false;
+      }
+      if (!password.value.trim()) {
+        password.style.borderColor = 'var(--error)';
+        setTimeout(function() { password.style.borderColor = ''; }, 2000);
+        valid = false;
+      }
+      if (!valid) {
+        showToast('ALL FIELDS REQUIRED');
+        return;
+      }
+      showToast('AUTHENTICATING...');
+      try {
+        const res = await fetch('/api/auth/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ identity: identity.value.trim(), password: password.value })
+        });
+        const data = await res.json();
+        if (data.success) {
+          localStorage.setItem('shadow_token', data.access_token || 'demo');
+          localStorage.setItem('shadow_user', JSON.stringify(data.user || {}));
+          setTimeout(function() { window.location = '/home'; }, 500);
+        } else {
+          showToast('AUTH FAILED');
+        }
+      } catch (err) {
+        showToast('CONNECTION ERROR');
+      }
+    }
+    document.querySelectorAll('.login-card input').forEach(function(input) {
+      input.addEventListener('keydown', function(e) {
+        if (e.key === 'Enter') handleLogin();
+      });
+    });
+  </script>
 </body>
 </html>

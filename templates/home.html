@@ -116,17 +116,19 @@
     </header>
 
     <!-- Search bar -->
+    <a href="/search" style="text-decoration:none;display:block;">
     <div class="search-bar" style="padding:12px 16px 4px;">
       <svg class="search-bar__icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
       </svg>
-      <input type="text" placeholder="Search SHADOW..." onclick="window.location='/search'">
+      <input type="text" placeholder="Search SHADOW..." readonly>
     </div>
+    </a>
 
     <!-- Stories -->
     <div class="section-header" style="margin-top:8px;">
       <span class="section-title">// Active Nodes</span>
-      <a href="#" class="section-action">See All</a>
+      <a href="/search" class="section-action">See All</a>
     </div>
 
     <div class="stories-scroll">
@@ -242,7 +244,7 @@
     </div>
 
     <!-- Mini profile card -->
-    <div class="mini-profile anim-stagger">
+    <a href="/profile" class="mini-profile anim-stagger" style="text-decoration:none;color:inherit;display:flex;align-items:center;gap:16px;">
       <div class="avatar avatar--lg">A</div>
       <div class="mini-profile__info">
         <div class="mini-profile__name">Affan</div>
@@ -262,7 +264,7 @@
           </div>
         </div>
       </div>
-    </div>
+    </a>
 
     <!-- Spacer -->
     <div style="height:16px;"></div>
