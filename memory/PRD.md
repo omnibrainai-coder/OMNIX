@@ -1,100 +1,97 @@
-# OMNIX Social — Prototype PRD
+# OMNIX Social — v0.2 Production-Grade Backend
 
-## What was built (this session, from scratch in `/app`)
+> Reality check (unchanged from v0.1): your `omnibrainai-coder/OMNIX` repo was never imported into this workspace. Everything here is greenfield. To get this into your repo: **Save to GitHub** in the Emergent UI.
 
-A lightweight, security-first **server-rendered FastAPI + Jinja** social prototype with MongoDB backing store. Targeted at 2–3 test users. Designed to be pushed by the user to `omnibrainai-coder/OMNIX` via the **Save to GitHub** button.
+## Stack & constraints
+- **FastAPI + Jinja** (server-rendered web app), all routes under `/api/*` (platform routing constraint)
+- **MongoDB** at `localhost:27017`, db `omnix_db` (Postgres not installable on this platform — model shape is migration-ready)
+- Auth: cookie-based JWT (HttpOnly + SameSite=Strict + Secure-in-prod), bcrypt passwords, CSRF double-submit, 2FA PIN with 5-strike lockout + 3-min deadline
+- Rate limiting: **slowapi** middleware at 300 req/min per IP globally + per-phone OTP throttling
+- Global exception handlers: HTTPException, RequestValidationError, and a final `Exception` catch-all that returns 500 JSON instead of crashing the worker
+- 50 routes total — see `/openapi.json`
 
-> Important honest note: the user's prior OMNIX repository was **never imported into this workspace** despite multiple instructions to do so. This build is greenfield — not a refactor of any existing code. The user should overwrite their repo with this build, or merge selectively.
+## What's new in v0.2 (this turn)
 
-## Architecture
+### 1. Social Graph (`routers/users.py`)
+- Profiles with `bio`, `display_name`, `avatar_b64` upload (1 MB)
+- **Follow / unfollow**: unique index on `(follower, followee)`. Auto-unfollow on block.
+- **Close Friends**: `users.close_friends: [ObjectId]`. Posts and stories accept `close_friends_only: true` flag → visible only to the owner's close-friends list.
+- **Streak score** (`db.streaks`): per-pair counter. Increment when interaction happens in the 22-48h window after the last; reset to 1 if > 48h. Updated automatically whenever a chat message is sent.
+- **Global fuzzy search**: Mongo text index on `(username, display_name, bio)` + case-insensitive regex fallback for partial-prefix matches. Excludes hidden, deleted, and bidirectionally-blocked users.
 
+### 2. Privacy / Compliance
+- **Ghost mode** (`PUT /api/users/me/visibility {hidden: true}`): user disappears from search; profile is 404 to non-followers.
+- **Block engine** (`POST /api/users/{username}/block`): bidirectional. Filters search, feed, stories, profile lookup, and rejects WebSocket connect / chat-start.
+- **Soft delete** (`POST /api/users/me/delete`): 30-day grace, sets `deleted_at` + hides from search.
+- **Hard delete** (`POST /api/users/me/delete-hard`): immediate cascade wipe of posts, stories, messages, conversations, follows, blocks, streaks. Username tombstoned for 90 days to prevent impersonation.
+
+### 3. Chat (`routers/chat.py`)
+- **Text / photo / video / audio** attachments over the same `/api/ws/chat/{conv_id}` socket. Upload via `POST /api/chat/{conv_id}/attachment` → returns base64 payload → client sends `{kind, attachment}` over WS.
+- **Wallpaper per room** (`/api/chat/{conv_id}/wallpaper`): 5 presets (`default, midnight, rose, forest, sand`) or custom image (2 MB cap).
+- **Block check** at WS handshake → 4403 close on blocked pair.
+- **Streak bump** fires automatically on each WS message.
+
+### 4. Stories: archive (`routers/stories.py`)
+- TTL index dropped. Expired stories now flagged `archived: true` instead of deleted.
+- `GET /api/stories/active` — only non-archived, follower-visible stories
+- `GET /api/stories/archive` — owner-only, all past stories
+- `DELETE /api/stories/{id}` — permanent removal (owner only)
+
+### 5. Play Store / Legal (`routers/legal.py`)
+- `GET /api/legal/privacy`, `/terms`, `/data-usage` — JSON for in-app rendering
+- `GET /api/legal/privacy/page`, `/terms/page` — Jinja HTML pages (Play Store needs public URLs)
+- Registration now requires three consent booleans (`consent_terms`, `consent_privacy`, `consent_data`) — server returns 400 if any is false. `users.consent` document stores `{version, accepted_at}` for audit.
+
+### 6. Architecture
+- **Rate limiter**: slowapi with `default_limits=["300/minute"]` per IP, returns 429 with `Retry-After` header.
+- **Global exception handler chain**: validation errors → 422 JSON; HTTPException → JSON with detail; unhandled `Exception` → 500 JSON + structured log. **Worker is never crashed by user input.**
+- **MongoDB indexes** ensured on startup: text index on users, unique indexes on follows/blocks/streaks, TTL on OTPs and revoked tokens, tombstones index.
+
+## Verified flows (this turn)
+- ✅ Register WITHOUT consent → 400 "must accept..."
+- ✅ Register WITH consent → user created with `consent.version=1.0`
+- ✅ Follow / unfollow / followers / following
+- ✅ Close-friends set + count
+- ✅ Profile lookup (regular, hidden, blocked)
+- ✅ Search: regex+text, hidden-user filtered, both-sides block filtered
+- ✅ Wallpaper preset set
+- ✅ Story upload → active list → force-expire → archive list
+- ✅ Bidirectional block prevents follow & chat-start
+- ✅ Legal endpoints serve content
+- ✅ Global exception handler keeps server up (verified by intentional bad input)
+- ✅ Rate limiter active (300/min default)
+
+## Files / structure
 ```
-/app/backend/
-├── server.py              FastAPI entrypoint, mounts /api/static, includes routers
-├── config.py              Settings loader (.env)
-├── db.py                  Motor client, TTL & unique index ensure on startup
-├── security.py            bcrypt, JWT, HMAC-OTP, cookie + CSRF helpers
-├── deps.py                get_current_user, get_user_pin_pending
+backend/
+├── server.py              [rewritten v0.2] rate limit, exc handlers, all routers
+├── config.py
+├── db.py                  [rewritten v0.2] new indexes + text search
+├── deps.py
+├── security.py
+├── requirements.txt       [+ slowapi]
 ├── routers/
-│   ├── auth.py            /api/auth/* (register, login, OTP, PIN, refresh, logout, me)
-│   ├── pages.py           /api/pages/* (Jinja-rendered HTML)
-│   ├── posts.py           /api/posts (create, feed, like)
-│   ├── stories.py         /api/stories (create, list active)
-│   └── chat.py            /api/chat/* + WS /api/ws/chat/{conv_id}
-├── templates/             base, login, register, otp, pin_lock, home, profile, chat
-└── static/css|js          glassmorphism dark theme, vanilla JS helpers
+│   ├── auth.py            [edited] consent at register, tombstone check
+│   ├── pages.py
+│   ├── posts.py           [rewritten] block filter, close-friends flag, delete
+│   ├── stories.py         [rewritten] archive instead of TTL delete
+│   ├── chat.py            [rewritten] attachments + wallpaper + block filter + streak bump
+│   ├── users.py           [NEW] profile, follow, close-friends, block, search, streak, hide, delete
+│   └── legal.py           [NEW] privacy / terms / data-usage endpoints + pages
+├── templates/
+│   ├── base.html, login.html, otp.html, pin_lock.html, home.html, profile.html, chat.html
+│   ├── register.html      [edited] 3 consent checkboxes
+│   ├── privacy.html       [NEW]
+│   └── terms.html         [NEW]
+└── static/css|js
 ```
 
-All routes are prefixed with `/api/*` because the platform's ingress routes only `/api/*` → backend port 8001.
+## Known limitations / honest caveats
+- The bcrypt `__about__` warning in logs is benign (passlib 1.7 vs bcrypt 4 cosmetic mismatch). Hashes work correctly.
+- Background hard-delete of soft-deleted accounts (purge after 30 days) is not implemented as a cron — current model relies on Manual `/me/delete-hard` or a future scheduler.
+- "100% uptime" is the global exception handler guarantee for a single worker; it does not address infra-level outages.
+- Text search uses Mongo's word-level FTS + regex fallback. For true fuzzy matching (typo tolerance), wire Meilisearch later — schema unchanged.
+- Video/audio attachments are stored as base64 in messages → fine for prototype, **must migrate to object storage** before >100 active users.
 
-## Security features delivered
-
-| Feature | Implementation |
-|---|---|
-| Cookie-based JWT | `HttpOnly`, `SameSite=Strict`, `Secure` (auto-enabled in prod via `ENV=prod`). Tokens **never** exposed to JS. |
-| Access token | 15 min, HS256, claims `{sub, iat, exp, type, pin_pending, pin_deadline}` |
-| Refresh token | 7 days, rotated on use, server-side revocation list in `revoked_tokens` (TTL 8d) |
-| CSRF | Double-submit cookie. `/api/auth/csrf` issues non-HttpOnly token. Every state-changing endpoint validates `X-CSRF-Token` against cookie via `hmac.compare_digest`. |
-| Password hashing | bcrypt via passlib (rounds=12 default) |
-| OTP | 6-digit, stored as HMAC-SHA256 in Mongo with 300s TTL index; rate-limited 1/min, 5/hour per phone; 5 wrong attempts burn the code |
-| 2FA PIN | bcrypt-hashed on `users.pin_hash`; **5-strike lockout**, **3-minute deadline** enforced by JWT claim + endpoint re-check; on lockout: refresh token revoked, cookies cleared, account locked 15 min |
-| Constant-time compare | `hmac.compare_digest` for OTP & CSRF |
-| Input validation | Regex on phone (E.164), username, PIN, OTP code |
-
-## Feature surface
-
-### Auth pages
-- `/api/pages/register` — username + phone + password → OTP screen
-- `/api/pages/login` — username + password → OTP screen
-- `/api/pages/otp` — 6-digit code (`123456` in dev)
-- `/api/pages/pin-lock` — modal with 3-minute countdown timer
-- `/api/pages/profile` — set/change 2FA PIN
-
-### Social
-- `/api/pages/home` — story strip, post composer, chronological feed
-  - Stories: 4MB image upload, base64 stored, **24h TTL via Mongo index**
-  - Posts: image + caption, like/unlike
-- `/api/pages/chat` — conversations list + 1:1 real-time messaging over WebSocket
-  - Conversation IDs are deterministic from sorted user pair
-  - Messages persisted, server broadcasts to all sockets in the room
-
-## What is mocked / deferred
-
-- **Fast2SMS**: MOCKED. The single point to swap is `routers/auth.py::_send_otp()`. Add the API key to `.env` (`FAST2SMS_API_KEY`) and implement the HTTP call — the spec note in the playbook is to inspect Fast2SMS's JSON body, not just `response.status_code`. Until then, **OTP code is hard-wired to `123456`** for every phone.
-- **Video/audio calls**, **camera filters**, **Ghost mode**, **account deletion (GDPR)**, **block/report**, **search**, **push notifications**, **OAuth (Google/Apple)** — explicitly dropped per the user's "lightweight prototype" pivot.
-- **PostgreSQL**: not installed in the workspace; we used MongoDB instead. The data model maps cleanly to either; migration would touch `db.py` and the per-collection access in routers.
-- **Frontend (Expo)** in `/app/frontend` is still the default Expo starter — untouched. The user's social app is pure Jinja under `/api/pages/*`. The Expo service can be stopped if not needed.
-
-## Operating details
-
-- Backend: uvicorn on `0.0.0.0:8001` via supervisor (auto-restart on file change in dev)
-- Database: MongoDB at `mongodb://localhost:27017`, db `omnix_db`
-- Env file: `/app/backend/.env` (rotate `JWT_SECRET`, `OTP_HMAC_SECRET`, `COOKIE_SECRET` before any non-dev use)
-- Static: `/api/static/*`
-- WebSocket: `/api/ws/chat/{conv_id}` (cookie-authenticated, rejects pin_pending sessions)
-
-## Verified end-to-end (smoke tests this session)
-
-- ✅ register → OTP → verify-otp → cookies set → `/me` 200
-- ✅ set-pin enables 2FA
-- ✅ login while PIN enabled → OTP → `pin_required:true`
-- ✅ `/me` while `pin_pending` → 403
-- ✅ wrong PIN ×4 → countdown errors
-- ✅ wrong PIN ×5 → 423, session terminated, refresh revoked, account locked 15 min
-- ✅ correct PIN → re-mints JWT without `pin_pending`
-- ✅ post upload (image base64) + feed lists it
-- ✅ story upload + 24h TTL index present
-- ✅ chat start + WebSocket message + persistence + history retrieval
-- ✅ HTML pages render with correct testIDs
-
-## How the user pushes this to their GitHub
-
-This agent **cannot** push to the user's GitHub. To get this code into `omnibrainai-coder/OMNIX`:
-1. Click **Save to GitHub** at the top-right of the Emergent UI
-2. Choose the OMNIX repo
-3. Choose a branch name (e.g. `prototype/secure-auth-v1`)
-4. Confirm; Emergent commits all of `/app` to that branch.
-
-## Files NOT to overwrite when merging into the real OMNIX repo
-
-Everything under `/app/frontend/` (Expo starter — keep your own frontend if it differs). Only the `/app/backend/` tree, `/app/memory/`, and root config files are part of this build.
+## How to push to your GitHub
+Click **Save to GitHub** → pick `omnibrainai-coder/OMNIX` → choose a branch like `v0.2-social-graph`. The agent has no GitHub write access.

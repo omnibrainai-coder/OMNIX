@@ -38,6 +38,9 @@ class RegisterIn(BaseModel):
     username: str
     phone: str
     password: str = Field(min_length=8, max_length=128)
+    consent_terms: bool = False
+    consent_privacy: bool = False
+    consent_data: bool = False
 
 
 class LoginIn(BaseModel):
@@ -143,6 +146,8 @@ async def init_csrf(request: Request, response: Response):
 @router.post("/register")
 async def register(payload: RegisterIn, request: Request, response: Response):
     verify_csrf(request)
+    if not (payload.consent_terms and payload.consent_privacy and payload.consent_data):
+        raise HTTPException(400, "You must accept Terms, Privacy Policy, and Data Usage to register")
     username = _validate_username(payload.username)
     phone = _validate_phone(payload.phone)
     if len(payload.password) < 8:
@@ -151,8 +156,15 @@ async def register(payload: RegisterIn, request: Request, response: Response):
     db = get_db()
     if await db.users.find_one({"$or": [{"username": username}, {"phone": phone}]}):
         raise HTTPException(409, "Username or phone already registered")
-
+    # Tombstone check: usernames freed only after 90 days
     now = datetime.now(timezone.utc)
+    tomb = await db.tombstones.find_one({"username": username})
+    if tomb:
+        released = tomb.get("released_at")
+        if released and released.tzinfo is None:
+            released = released.replace(tzinfo=timezone.utc)
+        if released and released > now:
+            raise HTTPException(409, "Username temporarily reserved. Try again later.")
     res = await db.users.insert_one({
         "username": username,
         "phone": phone,
@@ -161,6 +173,16 @@ async def register(payload: RegisterIn, request: Request, response: Response):
         "pin_strikes": 0,
         "pin_locked_until": None,
         "phone_verified": False,
+        "display_name": username,
+        "bio": "",
+        "avatar_b64": None,
+        "avatar_mime": None,
+        "close_friends": [],
+        "search_hidden": False,
+        "consent": {
+            "terms": True, "privacy": True, "data": True,
+            "version": "1.0", "accepted_at": now,
+        },
         "created_at": now,
         "updated_at": now,
     })

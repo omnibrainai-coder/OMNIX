@@ -10,6 +10,22 @@
     <input name="phone" data-testid="register-phone" required pattern="^\+?[0-9]{10,15}$" />
     <label>Password (min 8 chars)</label>
     <input name="password" type="password" data-testid="register-password" required minlength="8" />
+
+    <div class="consent-block">
+      <label class="checkbox">
+        <input type="checkbox" name="consent_terms" data-testid="consent-terms" required />
+        I accept the <a href="/api/legal/terms/page" target="_blank">Terms of Service</a>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="consent_privacy" data-testid="consent-privacy" required />
+        I accept the <a href="/api/legal/privacy/page" target="_blank">Privacy Policy</a>
+      </label>
+      <label class="checkbox">
+        <input type="checkbox" name="consent_data" data-testid="consent-data" required />
+        I agree to the data usage described above
+      </label>
+    </div>
+
     <button type="submit" data-testid="register-submit-button">Create &amp; send OTP</button>
     <p class="err" id="register-error" data-testid="register-error"></p>
   </form>
@@ -20,7 +36,12 @@ document.getElementById('register-form').addEventListener('submit', async (e) =>
   e.preventDefault();
   const f = new FormData(e.target);
   const out = await window.api('/api/auth/register', 'POST', {
-    username: f.get('username'), phone: f.get('phone'), password: f.get('password')
+    username: f.get('username'),
+    phone: f.get('phone'),
+    password: f.get('password'),
+    consent_terms: f.get('consent_terms') === 'on',
+    consent_privacy: f.get('consent_privacy') === 'on',
+    consent_data: f.get('consent_data') === 'on',
   });
   const errEl = document.getElementById('register-error');
   if (!out.ok) { errEl.textContent = out.detail || 'Registration failed'; return; }
