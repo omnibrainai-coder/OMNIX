@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Verify OTP · OMNIX{% endblock %}
+{% block content %}
+<section class="auth-card">
+  <h1>Verify your phone</h1>
+  <p class="muted">We sent a 6-digit code to <b>{{ phone }}</b>.</p>
+  <p class="muted small">DEV MODE: the code is <code>123456</code></p>
+  <form id="otp-form" data-testid="otp-form" autocomplete="off">
+    <input name="phone" type="hidden" value="{{ phone }}" />
+    <label>OTP Code</label>
+    <input name="code" data-testid="otp-code" required pattern="[0-9]{6}" maxlength="6" inputmode="numeric" />
+    <button type="submit" data-testid="otp-submit-button">Verify</button>
+    <p class="err" id="otp-error" data-testid="otp-error"></p>
+  </form>
+</section>
+<script>
+document.getElementById('otp-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const out = await window.api('/api/auth/verify-otp', 'POST', {
+    phone: f.get('phone'), code: f.get('code')
+  });
+  const errEl = document.getElementById('otp-error');
+  if (!out.ok) { errEl.textContent = out.detail || 'Verification failed'; return; }
+  location.href = out.data.next || '/api/pages/home';
+});
+</script>
+{% endblock %}

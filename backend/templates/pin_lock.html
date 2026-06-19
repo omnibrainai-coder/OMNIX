@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}2FA · OMNIX{% endblock %}
+{% block content %}
+<section class="pin-overlay" data-testid="pin-lock-overlay">
+  <div class="pin-card">
+    <h1>Enter your 6-digit PIN</h1>
+    <p class="muted">Session locks in <span id="pin-timer" data-testid="pin-timer">--:--</span></p>
+    <form id="pin-form" data-testid="pin-form" autocomplete="off">
+      <input name="pin" data-testid="pin-input" required pattern="[0-9]{6}" maxlength="6" inputmode="numeric" autofocus />
+      <button type="submit" data-testid="pin-submit-button">Unlock</button>
+    </form>
+    <p class="err" id="pin-error" data-testid="pin-error"></p>
+  </div>
+</section>
+<script>
+const deadline = {{ deadline | int }};
+function tick() {
+  const remaining = Math.max(0, deadline - Math.floor(Date.now() / 1000));
+  const m = String(Math.floor(remaining / 60)).padStart(2, '0');
+  const s = String(remaining % 60).padStart(2, '0');
+  document.getElementById('pin-timer').textContent = `${m}:${s}`;
+  if (remaining <= 0) {
+    document.getElementById('pin-error').textContent = 'PIN deadline expired. Logging out...';
+    window.api('/api/auth/logout', 'POST').finally(() => location.href = '/api/pages/login');
+  }
+}
+tick();
+const timer = setInterval(tick, 1000);
+
+document.getElementById('pin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const out = await window.api('/api/auth/verify-pin', 'POST', { pin: f.get('pin') });
+  const errEl = document.getElementById('pin-error');
+  if (!out.ok) {
+    errEl.textContent = out.detail || 'Invalid PIN';
+    if (out.status === 423 || out.status === 440) {
+      setTimeout(() => location.href = '/api/pages/login', 1500);
+    }
+    return;
+  }
+  clearInterval(timer);
+  location.href = out.data.next || '/api/pages/home';
+});
+</script>
+{% endblock %}

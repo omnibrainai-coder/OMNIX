@@ -1,0 +1,95 @@
+{% extends "base.html" %}
+{% block title %}Chat · OMNIX{% endblock %}
+{% block content %}
+<section class="chat-shell">
+  <div class="chat-side">
+    <h2>Conversations</h2>
+    <form id="start-form" data-testid="start-chat-form" autocomplete="off">
+      <input name="username" data-testid="peer-username" placeholder="Start chat with username" required />
+      <button type="submit" data-testid="start-chat-button">Open</button>
+    </form>
+    <div id="conv-list" data-testid="conversation-list"></div>
+  </div>
+  <div class="chat-main">
+    <h2 id="chat-title">Select a conversation</h2>
+    <div id="messages" class="messages" data-testid="messages"></div>
+    <form id="send-form" data-testid="send-form" autocomplete="off" style="display:none;">
+      <input name="text" data-testid="message-input" placeholder="Type a message…" required maxlength="2000" />
+      <button type="submit" data-testid="message-send-button">Send</button>
+    </form>
+  </div>
+</section>
+<script>
+const ME_ID = "{{ user_id }}";
+const PEER_ARG = "{{ peer_username }}";
+let activeConv = null;
+let ws = null;
+
+async function loadConversations() {
+  const out = await window.api('/api/chat/conversations', 'GET');
+  const el = document.getElementById('conv-list');
+  el.innerHTML = '';
+  if (!out.ok) return;
+  (out.data.conversations || []).forEach(c => {
+    const b = document.createElement('button');
+    b.textContent = '@' + (c.peer?.username || '(unknown)');
+    b.dataset.testid = 'conv-' + (c.peer?.username || '');
+    b.onclick = () => openConv(c.conversation_id, c.peer?.username);
+    el.appendChild(b);
+  });
+}
+
+async function openConv(convId, peerName) {
+  activeConv = convId;
+  document.getElementById('chat-title').textContent = 'Chat with @' + peerName;
+  document.getElementById('send-form').style.display = '';
+  const msgs = document.getElementById('messages');
+  msgs.innerHTML = '';
+  const hist = await window.api('/api/chat/messages/' + encodeURIComponent(convId), 'GET');
+  if (hist.ok) {
+    (hist.data.messages || []).forEach(m => renderMessage(m));
+  }
+  if (ws) { try { ws.close(); } catch {} }
+  const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
+  ws = new WebSocket(`${proto}//${location.host}/api/ws/chat/${encodeURIComponent(convId)}`);
+  ws.onmessage = (ev) => {
+    const data = JSON.parse(ev.data);
+    if (data.type === 'message') renderMessage(data);
+  };
+}
+
+function renderMessage(m) {
+  const msgs = document.getElementById('messages');
+  const row = document.createElement('div');
+  row.className = 'msg ' + (m.from === ME_ID ? 'mine' : 'theirs');
+  row.textContent = m.text;
+  msgs.appendChild(row);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+document.getElementById('start-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const out = await window.api('/api/chat/start', 'POST', { username: f.get('username') });
+  if (!out.ok) { alert(out.detail || 'Failed'); return; }
+  await loadConversations();
+  openConv(out.data.conversation_id, out.data.peer.username);
+});
+
+document.getElementById('send-form').addEventListener('submit', (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const text = (f.get('text') || '').trim();
+  if (!ws || ws.readyState !== 1 || !text) return;
+  ws.send(JSON.stringify({ text }));
+  e.target.reset();
+});
+
+loadConversations();
+if (PEER_ARG) {
+  window.api('/api/chat/start', 'POST', { username: PEER_ARG }).then(out => {
+    if (out.ok) openConv(out.data.conversation_id, out.data.peer.username);
+  });
+}
+</script>
+{% endblock %}

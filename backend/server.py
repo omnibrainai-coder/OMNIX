@@ -1,75 +1,55 @@
-from fastapi import FastAPI, APIRouter
-from dotenv import load_dotenv
-from starlette.middleware.cors import CORSMiddleware
-from motor.motor_asyncio import AsyncIOMotorClient
-import os
+"""FastAPI entrypoint. Wires routers, mounts static, sets up CORS, ensures indexes."""
 import logging
 from pathlib import Path
-from pydantic import BaseModel, Field
-from typing import List
-import uuid
-from datetime import datetime
 
+from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 
-ROOT_DIR = Path(__file__).parent
-load_dotenv(ROOT_DIR / '.env')
+from config import settings
+from db import ensure_indexes, close_client
+from routers import auth, pages, posts, stories, chat
 
-# MongoDB connection
-mongo_url = os.environ['MONGO_URL']
-client = AsyncIOMotorClient(mongo_url)
-db = client[os.environ['DB_NAME']]
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
+log = logging.getLogger("server")
 
-# Create the main app without a prefix
-app = FastAPI()
+ROOT = Path(__file__).parent
 
-# Create a router with the /api prefix
-api_router = APIRouter(prefix="/api")
+app = FastAPI(title="OMNIX Social", version="0.1.0")
 
-
-# Define Models
-class StatusCheck(BaseModel):
-    id: str = Field(default_factory=lambda: str(uuid.uuid4()))
-    client_name: str
-    timestamp: datetime = Field(default_factory=datetime.utcnow)
-
-class StatusCheckCreate(BaseModel):
-    client_name: str
-
-# Add your routes to the router instead of directly to app
-@api_router.get("/")
-async def root():
-    return {"message": "Hello World"}
-
-@api_router.post("/status", response_model=StatusCheck)
-async def create_status_check(input: StatusCheckCreate):
-    status_dict = input.dict()
-    status_obj = StatusCheck(**status_dict)
-    _ = await db.status_checks.insert_one(status_obj.dict())
-    return status_obj
-
-@api_router.get("/status", response_model=List[StatusCheck])
-async def get_status_checks():
-    status_checks = await db.status_checks.find().to_list(1000)
-    return [StatusCheck(**status_check) for status_check in status_checks]
-
-# Include the router in the main app
-app.include_router(api_router)
-
+# CORS: this app is same-origin via /api/* ingress; keep permissive in dev only.
 app.add_middleware(
     CORSMiddleware,
+    allow_origins=["*"] if settings.ENV == "dev" else [],
     allow_credentials=True,
-    allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
-)
-logger = logging.getLogger(__name__)
+# Static files at /api/static/*
+static_dir = ROOT / "static"
+static_dir.mkdir(exist_ok=True)
+app.mount("/api/static", StaticFiles(directory=str(static_dir)), name="static")
+
+# Routers
+app.include_router(auth.router)
+app.include_router(pages.router)
+app.include_router(posts.router)
+app.include_router(stories.router)
+app.include_router(chat.router)
+
+
+@app.get("/api/health")
+async def health():
+    return {"ok": True, "env": settings.ENV}
+
+
+@app.on_event("startup")
+async def on_startup():
+    await ensure_indexes()
+    log.info("Indexes ensured. Server ready.")
+
 
 @app.on_event("shutdown")
-async def shutdown_db_client():
-    client.close()
+async def on_shutdown():
+    close_client()

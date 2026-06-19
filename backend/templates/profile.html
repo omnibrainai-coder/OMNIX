@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Profile · OMNIX{% endblock %}
+{% block content %}
+<section class="profile-card">
+  <h1>@{{ username }}</h1>
+  <p class="muted">Phone: {{ phone }}</p>
+  <p class="muted">2FA PIN: <span data-testid="pin-status">{{ 'Enabled' if pin_enabled else 'Disabled' }}</span></p>
+
+  <h2>{{ 'Change' if pin_enabled else 'Set' }} 2FA PIN</h2>
+  <form id="set-pin-form" data-testid="set-pin-form" autocomplete="off">
+    <label>New 6-digit PIN</label>
+    <input name="pin" data-testid="new-pin-input" required pattern="[0-9]{6}" maxlength="6" inputmode="numeric" />
+    <button type="submit" data-testid="set-pin-button">Save PIN</button>
+    <p id="set-pin-msg" data-testid="set-pin-msg"></p>
+  </form>
+</section>
+<script>
+document.getElementById('set-pin-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const out = await window.api('/api/auth/set-pin', 'POST', { pin: f.get('pin') });
+  const msg = document.getElementById('set-pin-msg');
+  msg.textContent = out.ok ? '2FA PIN saved.' : (out.detail || 'Failed');
+  msg.className = out.ok ? 'ok' : 'err';
+});
+</script>
+{% endblock %}

@@ -1,0 +1,29 @@
+{% extends "base.html" %}
+{% block title %}Login · OMNIX{% endblock %}
+{% block content %}
+<section class="auth-card">
+  <h1>Welcome back</h1>
+  <p class="muted">Sign in to OMNIX</p>
+  <form id="login-form" data-testid="login-form" autocomplete="off">
+    <label>Username</label>
+    <input name="username" data-testid="login-username" required minlength="3" maxlength="24" />
+    <label>Password</label>
+    <input name="password" type="password" data-testid="login-password" required minlength="8" />
+    <button type="submit" data-testid="login-submit-button">Send OTP</button>
+    <p class="err" id="login-error" data-testid="login-error"></p>
+  </form>
+  <p class="muted small">No account? <a href="/api/pages/register">Register</a></p>
+</section>
+<script>
+document.getElementById('login-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const out = await window.api('/api/auth/login', 'POST', {
+    username: f.get('username'), password: f.get('password')
+  });
+  const errEl = document.getElementById('login-error');
+  if (!out.ok) { errEl.textContent = out.detail || 'Login failed'; return; }
+  location.href = `/api/pages/otp?phone=${encodeURIComponent(out.data.phone)}`;
+});
+</script>
+{% endblock %}
