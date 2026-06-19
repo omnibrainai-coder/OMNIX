@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}Close Friends · OMNIX{% endblock %}
+{% block content %}
+<section class="profile-card">
+  <h1>Close Friends</h1>
+  <p class="muted">Posts and stories you mark as “close friends only” are visible only to people on this list.</p>
+
+  <form id="add-form" data-testid="close-friends-add-form" autocomplete="off" class="inline-form">
+    <input name="username" data-testid="close-friends-add-input" placeholder="@username" required />
+    <button type="submit" data-testid="close-friends-add-button">Add</button>
+  </form>
+  <p id="add-msg" class="err" data-testid="close-friends-msg"></p>
+
+  <div id="cf-list" class="user-list" data-testid="close-friends-list"></div>
+</section>
+
+<script>
+let current = []; // array of usernames
+
+async function load() {
+  const out = await window.api('/api/users/me/close-friends', 'GET');
+  current = (out.data?.close_friends || []).map(u => u.username);
+  render(out.data?.close_friends || []);
+}
+
+function render(items) {
+  const el = document.getElementById('cf-list');
+  el.innerHTML = items.length ? '' : '<p class="muted" data-testid="close-friends-empty">No close friends yet.</p>';
+  for (const u of items) {
+    const row = document.createElement('div');
+    row.className = 'user-row';
+    row.dataset.testid = 'cf-row-' + u.username;
+    row.innerHTML = `
+      <div class="avatar-tiny" data-letter="${u.username[0].toUpperCase()}"></div>
+      <div class="user-meta"><span class="username">@${u.username}</span></div>
+      <button class="danger-btn" data-username="${u.username}" data-testid="cf-remove-${u.username}">Remove</button>
+    `;
+    el.appendChild(row);
+  }
+  el.querySelectorAll('button.danger-btn').forEach(b => {
+    b.onclick = async () => {
+      const next = current.filter(x => x !== b.dataset.username);
+      const r = await window.api('/api/users/me/close-friends', 'PUT', { usernames: next });
+      if (r.ok) load();
+    };
+  });
+}
+
+document.getElementById('add-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const uname = String(f.get('username') || '').replace(/^@/, '').toLowerCase().trim();
+  if (!uname) return;
+  if (current.includes(uname)) {
+    document.getElementById('add-msg').textContent = 'Already in your list.';
+    return;
+  }
+  const next = [...current, uname];
+  const r = await window.api('/api/users/me/close-friends', 'PUT', { usernames: next });
+  document.getElementById('add-msg').textContent = r.ok ? '' : (r.detail || 'Failed');
+  e.target.reset();
+  load();
+});
+
+load();
+</script>
+{% endblock %}

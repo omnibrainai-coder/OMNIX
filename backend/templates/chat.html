@@ -10,15 +10,37 @@
     </form>
     <div id="conv-list" data-testid="conversation-list"></div>
   </div>
-  <div class="chat-main">
-    <h2 id="chat-title">Select a conversation</h2>
+  <div class="chat-main" id="chat-main">
+    <div class="chat-header">
+      <h2 id="chat-title">Select a conversation</h2>
+      <button id="wallpaper-button" data-testid="wallpaper-button" style="display:none;">🎨 Wallpaper</button>
+    </div>
     <div id="messages" class="messages" data-testid="messages"></div>
     <form id="send-form" data-testid="send-form" autocomplete="off" style="display:none;">
-      <input name="text" data-testid="message-input" placeholder="Type a message…" required maxlength="2000" />
+      <input name="text" data-testid="message-input" placeholder="Type a message…" maxlength="2000" />
+      <label class="attach-btn" data-testid="attach-button" title="Attach photo/video/audio">
+        📎
+        <input type="file" id="attach-input" data-testid="attach-input" accept="image/*,video/*,audio/*" style="display:none;" />
+      </label>
       <button type="submit" data-testid="message-send-button">Send</button>
     </form>
   </div>
 </section>
+
+<!-- Wallpaper modal -->
+<div id="wallpaper-modal" class="modal-overlay" style="display:none;" data-testid="wallpaper-modal">
+  <div class="modal-card">
+    <h2>Pick a chat wallpaper</h2>
+    <div class="wallpaper-grid" id="wallpaper-grid"></div>
+    <h3 class="muted small">Or upload your own (max 2 MB)</h3>
+    <form id="custom-wallpaper-form" enctype="multipart/form-data" class="inline-form">
+      <input type="file" name="image" accept="image/*" data-testid="wallpaper-custom-file" required />
+      <button type="submit" data-testid="wallpaper-custom-upload">Upload</button>
+    </form>
+    <button id="wallpaper-close" class="muted" data-testid="wallpaper-close">Close</button>
+  </div>
+</div>
+
 <script>
 const ME_ID = "{{ user_id }}";
 const PEER_ARG = "{{ peer_username }}";
@@ -39,16 +61,30 @@ async function loadConversations() {
   });
 }
 
+async function applyWallpaper(wp) {
+  const main = document.getElementById('chat-main');
+  if (wp.custom_b64) {
+    main.style.background = `center / cover url("data:${wp.custom_mime};base64,${wp.custom_b64}")`;
+  } else if (wp.preset_id) {
+    const presets = {default:'#0f1115',midnight:'#0a0f1a',rose:'#1f0d14',forest:'#0d1f13',sand:'#1f1a0d'};
+    main.style.background = presets[wp.preset_id] || presets.default;
+  }
+}
+
 async function openConv(convId, peerName) {
   activeConv = convId;
   document.getElementById('chat-title').textContent = 'Chat with @' + peerName;
   document.getElementById('send-form').style.display = '';
+  document.getElementById('wallpaper-button').style.display = '';
   const msgs = document.getElementById('messages');
   msgs.innerHTML = '';
+  // Wallpaper
+  const wp = await window.api(`/api/chat/${convId}/wallpaper`, 'GET');
+  if (wp.ok) applyWallpaper(wp.data.wallpaper);
+  // History
   const hist = await window.api('/api/chat/messages/' + encodeURIComponent(convId), 'GET');
-  if (hist.ok) {
-    (hist.data.messages || []).forEach(m => renderMessage(m));
-  }
+  if (hist.ok) (hist.data.messages || []).forEach(m => renderMessage(m));
+  // WebSocket
   if (ws) { try { ws.close(); } catch {} }
   const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
   ws = new WebSocket(`${proto}//${location.host}/api/ws/chat/${encodeURIComponent(convId)}`);
@@ -62,7 +98,16 @@ function renderMessage(m) {
   const msgs = document.getElementById('messages');
   const row = document.createElement('div');
   row.className = 'msg ' + (m.from === ME_ID ? 'mine' : 'theirs');
-  row.textContent = m.text;
+  row.dataset.testid = 'msg-' + (m.id || Math.random().toString(36).slice(2));
+  if (m.kind === 'photo' && m.attachment) {
+    row.innerHTML = `<img class="msg-media" src="data:${m.attachment.mime};base64,${m.attachment.b64}"/>`;
+  } else if (m.kind === 'video' && m.attachment) {
+    row.innerHTML = `<video class="msg-media" controls src="data:${m.attachment.mime};base64,${m.attachment.b64}"></video>`;
+  } else if (m.kind === 'audio' && m.attachment) {
+    row.innerHTML = `<audio controls src="data:${m.attachment.mime};base64,${m.attachment.b64}"></audio>`;
+  } else {
+    row.textContent = m.text || '';
+  }
   msgs.appendChild(row);
   msgs.scrollTop = msgs.scrollHeight;
 }
@@ -81,8 +126,56 @@ document.getElementById('send-form').addEventListener('submit', (e) => {
   const f = new FormData(e.target);
   const text = (f.get('text') || '').trim();
   if (!ws || ws.readyState !== 1 || !text) return;
-  ws.send(JSON.stringify({ text }));
+  ws.send(JSON.stringify({ kind: 'text', text }));
   e.target.reset();
+});
+
+document.getElementById('attach-input').addEventListener('change', async (e) => {
+  const file = e.target.files[0];
+  if (!file || !activeConv) return;
+  const fd = new FormData(); fd.append('file', file);
+  const out = await window.apiUpload(`/api/chat/${activeConv}/attachment`, fd);
+  if (!out.ok) { alert(out.detail || 'Upload failed'); return; }
+  const att = out.data.attachment;
+  ws.send(JSON.stringify({ kind: att.kind, attachment: att }));
+  e.target.value = '';
+});
+
+// Wallpaper modal
+document.getElementById('wallpaper-button').addEventListener('click', async () => {
+  const r = await window.api(`/api/chat/${activeConv}/wallpaper`, 'GET');
+  if (!r.ok) return;
+  const grid = document.getElementById('wallpaper-grid');
+  grid.innerHTML = '';
+  for (const [id, color] of Object.entries(r.data.presets)) {
+    const tile = document.createElement('button');
+    tile.className = 'wallpaper-tile';
+    tile.style.background = color;
+    tile.dataset.preset = id;
+    tile.dataset.testid = 'wallpaper-preset-' + id;
+    tile.textContent = id;
+    tile.onclick = async () => {
+      const o = await window.api(`/api/chat/${activeConv}/wallpaper`, 'POST', { preset_id: id });
+      if (o.ok) { applyWallpaper(o.data.wallpaper); document.getElementById('wallpaper-modal').style.display = 'none'; }
+    };
+    grid.appendChild(tile);
+  }
+  document.getElementById('wallpaper-modal').style.display = '';
+});
+document.getElementById('wallpaper-close').onclick = () =>
+  document.getElementById('wallpaper-modal').style.display = 'none';
+
+document.getElementById('custom-wallpaper-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const file = e.target.image.files[0];
+  if (!file) return;
+  const buf = await file.arrayBuffer();
+  const b64 = btoa(String.fromCharCode(...new Uint8Array(buf)));
+  const r = await window.api(`/api/chat/${activeConv}/wallpaper`, 'POST', {
+    custom_b64: b64, custom_mime: file.type,
+  });
+  if (r.ok) { applyWallpaper(r.data.wallpaper); document.getElementById('wallpaper-modal').style.display = 'none'; }
+  else alert(r.detail || 'Failed');
 });
 
 loadConversations();

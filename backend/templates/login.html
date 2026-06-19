@@ -12,7 +12,13 @@
     <button type="submit" data-testid="login-submit-button">Send OTP</button>
     <p class="err" id="login-error" data-testid="login-error"></p>
   </form>
-  <p class="muted small">No account? <a href="/api/pages/register">Register</a></p>
+  <p class="muted small">No account? <a href="/api/pages/register" data-testid="link-to-register">Register</a></p>
+  <p class="muted small legal-footer">
+    By signing in you agree to our
+    <a href="/api/legal/terms/page" target="_blank" data-testid="legal-terms-link">Terms of Service</a>,
+    <a href="/api/legal/privacy/page" target="_blank" data-testid="legal-privacy-link">Privacy Policy</a>,
+    and data usage agreement.
+  </p>
 </section>
 <script>
 document.getElementById('login-form').addEventListener('submit', async (e) => {

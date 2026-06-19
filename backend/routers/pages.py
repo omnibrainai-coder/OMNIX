@@ -1,15 +1,11 @@
-"""Jinja-rendered HTML page routes. All under /api/pages/*.
-
-Pages that require authentication will redirect to /api/pages/login if cookie is missing/invalid.
-The pin-lock page is rendered when the JWT has pin_pending=True.
-"""
+"""Jinja-rendered HTML page routes. All under /api/pages/*."""
+from bson import ObjectId
 from fastapi import APIRouter, Request, HTTPException
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
 from security import ACCESS_COOKIE, decode_token, ensure_csrf_cookie
 from db import get_db
-from bson import ObjectId
 
 router = APIRouter(prefix="/api/pages", tags=["pages"])
 templates = Jinja2Templates(directory="templates")
@@ -34,6 +30,14 @@ async def _load_user(payload):
         return None
 
 
+async def _require_auth(request: Request):
+    payload = _safe_decode(request.cookies.get(ACCESS_COOKIE))
+    if not payload or payload.get("pin_pending"):
+        return None
+    return await _load_user(payload)
+
+
+# ---------- Public pages ----------
 @router.get("/", response_class=HTMLResponse)
 async def root(request: Request):
     return RedirectResponse(url="/api/pages/login", status_code=302)
@@ -60,19 +64,19 @@ async def otp_page(request: Request, phone: str = ""):
     return resp
 
 
+# ---------- PIN lock ----------
 @router.get("/pin-lock", response_class=HTMLResponse)
 async def pin_lock(request: Request):
     payload = _safe_decode(request.cookies.get(ACCESS_COOKIE))
     if not payload or not payload.get("pin_pending"):
         return RedirectResponse(url="/api/pages/home", status_code=302)
     deadline = payload.get("pin_deadline", 0)
-    resp = templates.TemplateResponse(
-        "pin_lock.html", {"request": request, "deadline": deadline}
-    )
+    resp = templates.TemplateResponse("pin_lock.html", {"request": request, "deadline": deadline})
     ensure_csrf_cookie(request, resp)
     return resp
 
 
+# ---------- Home ----------
 @router.get("/home", response_class=HTMLResponse)
 async def home_page(request: Request):
     payload = _safe_decode(request.cookies.get(ACCESS_COOKIE))
@@ -95,33 +99,39 @@ async def home_page(request: Request):
     return resp
 
 
+# ---------- Own profile (rich) ----------
 @router.get("/profile", response_class=HTMLResponse)
 async def profile_page(request: Request):
-    payload = _safe_decode(request.cookies.get(ACCESS_COOKIE))
-    if not payload or payload.get("pin_pending"):
-        return RedirectResponse(url="/api/pages/login", status_code=302)
-    user = await _load_user(payload)
+    user = await _require_auth(request)
     if not user:
         return RedirectResponse(url="/api/pages/login", status_code=302)
+    db = get_db()
+    followers = await db.follows.count_documents({"followee": user["_id"]})
+    following = await db.follows.count_documents({"follower": user["_id"]})
     resp = templates.TemplateResponse(
         "profile.html",
         {
             "request": request,
             "username": user["username"],
             "phone": user["phone"],
+            "display_name": user.get("display_name") or user["username"],
+            "bio": user.get("bio") or "",
+            "avatar_b64": user.get("avatar_b64") or "",
+            "avatar_mime": user.get("avatar_mime") or "image/png",
             "pin_enabled": bool(user.get("pin_hash")),
+            "search_hidden": bool(user.get("search_hidden")),
+            "followers": followers,
+            "following": following,
         },
     )
     ensure_csrf_cookie(request, resp)
     return resp
 
 
+# ---------- Chat ----------
 @router.get("/chat", response_class=HTMLResponse)
 async def chat_page(request: Request, peer: str = ""):
-    payload = _safe_decode(request.cookies.get(ACCESS_COOKIE))
-    if not payload or payload.get("pin_pending"):
-        return RedirectResponse(url="/api/pages/login", status_code=302)
-    user = await _load_user(payload)
+    user = await _require_auth(request)
     if not user:
         return RedirectResponse(url="/api/pages/login", status_code=302)
     resp = templates.TemplateResponse(
@@ -133,5 +143,63 @@ async def chat_page(request: Request, peer: str = ""):
             "peer_username": peer,
         },
     )
+    ensure_csrf_cookie(request, resp)
+    return resp
+
+
+# ---------- Search ----------
+@router.get("/search", response_class=HTMLResponse)
+async def search_page(request: Request, q: str = ""):
+    user = await _require_auth(request)
+    if not user:
+        return RedirectResponse(url="/api/pages/login", status_code=302)
+    resp = templates.TemplateResponse("search.html", {"request": request, "q": q})
+    ensure_csrf_cookie(request, resp)
+    return resp
+
+
+# ---------- Public user profile ----------
+@router.get("/user/{username}", response_class=HTMLResponse)
+async def user_profile_page(username: str, request: Request):
+    user = await _require_auth(request)
+    if not user:
+        return RedirectResponse(url="/api/pages/login", status_code=302)
+    resp = templates.TemplateResponse(
+        "user_profile.html",
+        {"request": request, "target_username": username.lower()},
+    )
+    ensure_csrf_cookie(request, resp)
+    return resp
+
+
+# ---------- Close friends ----------
+@router.get("/close-friends", response_class=HTMLResponse)
+async def close_friends_page(request: Request):
+    user = await _require_auth(request)
+    if not user:
+        return RedirectResponse(url="/api/pages/login", status_code=302)
+    resp = templates.TemplateResponse("close_friends.html", {"request": request})
+    ensure_csrf_cookie(request, resp)
+    return resp
+
+
+# ---------- Blocks ----------
+@router.get("/blocks", response_class=HTMLResponse)
+async def blocks_page(request: Request):
+    user = await _require_auth(request)
+    if not user:
+        return RedirectResponse(url="/api/pages/login", status_code=302)
+    resp = templates.TemplateResponse("blocks.html", {"request": request})
+    ensure_csrf_cookie(request, resp)
+    return resp
+
+
+# ---------- Story archive ----------
+@router.get("/archive", response_class=HTMLResponse)
+async def archive_page(request: Request):
+    user = await _require_auth(request)
+    if not user:
+        return RedirectResponse(url="/api/pages/login", status_code=302)
+    resp = templates.TemplateResponse("archive.html", {"request": request})
     ensure_csrf_cookie(request, resp)
     return resp

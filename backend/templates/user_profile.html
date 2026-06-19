@@ -1,0 +1,67 @@
+{% extends "base.html" %}
+{% block title %}@{{ target_username }} · OMNIX{% endblock %}
+{% block content %}
+<section class="profile-card" data-testid="public-profile" data-username="{{ target_username }}">
+  <div id="user-profile-shell">
+    <p class="muted">Loading…</p>
+  </div>
+</section>
+
+<script>
+const TARGET = {{ target_username | tojson }};
+async function load() {
+  const out = await window.api('/api/users/' + encodeURIComponent(TARGET), 'GET');
+  const shell = document.getElementById('user-profile-shell');
+  if (!out.ok) {
+    shell.innerHTML = '<p class="err" data-testid="user-not-found">User not found.</p>';
+    return;
+  }
+  const u = out.data;
+  const avatarHtml = u.avatar_b64
+    ? `<img class="avatar-circle" src="data:${u.avatar_mime};base64,${u.avatar_b64}"/>`
+    : `<div class="avatar-circle"><span>${u.username[0].toUpperCase()}</span></div>`;
+  shell.innerHTML = `
+    <div class="profile-header">
+      ${avatarHtml}
+      <div class="profile-info">
+        <h1 data-testid="user-username">@${u.username}</h1>
+        <p class="muted" data-testid="user-display-name">${u.display_name || ''}</p>
+        <p data-testid="user-bio">${(u.bio || '').replace(/</g, '&lt;')}</p>
+        <p class="muted">Followers: <b data-testid="user-followers">${u.followers}</b> · Following: <b data-testid="user-following">${u.following}</b></p>
+      </div>
+    </div>
+    <div class="action-row">
+      <button id="follow-btn" data-testid="user-follow-button">${u.am_following ? 'Unfollow' : 'Follow'}</button>
+      <button id="message-btn" data-testid="user-message-button">Message</button>
+      <button id="block-btn" class="danger-btn" data-testid="user-block-button">Block</button>
+    </div>
+    <div id="streak-row" class="muted small" data-testid="user-streak"></div>
+  `;
+  // Streak
+  const sr = await window.api('/api/users/streak/' + encodeURIComponent(TARGET), 'GET');
+  if (sr.ok && sr.data.count > 0) {
+    document.getElementById('streak-row').innerHTML = `🔥 ${sr.data.count}-day streak ${sr.data.active ? '(active)' : '(at risk)'}`;
+  } else {
+    document.getElementById('streak-row').textContent = 'No streak yet — chat to start one.';
+  }
+
+  document.getElementById('follow-btn').onclick = async () => {
+    const verb = u.am_following ? 'DELETE' : 'POST';
+    const r = await window.api(`/api/users/${u.username}/follow`, verb);
+    if (r.ok) load();
+  };
+  document.getElementById('message-btn').onclick = () => {
+    location.href = '/api/pages/chat?peer=' + encodeURIComponent(u.username);
+  };
+  document.getElementById('block-btn').onclick = async () => {
+    if (!confirm(`Block @${u.username}? You will not see each other on OMNIX.`)) return;
+    const r = await window.api(`/api/users/${u.username}/block`, 'POST');
+    if (r.ok) {
+      alert('Blocked.');
+      location.href = '/api/pages/home';
+    }
+  };
+}
+load();
+</script>
+{% endblock %}

@@ -2,19 +2,86 @@
 {% block title %}Profile · OMNIX{% endblock %}
 {% block content %}
 <section class="profile-card">
-  <h1>@{{ username }}</h1>
-  <p class="muted">Phone: {{ phone }}</p>
-  <p class="muted">2FA PIN: <span data-testid="pin-status">{{ 'Enabled' if pin_enabled else 'Disabled' }}</span></p>
+  <div class="profile-header">
+    <div class="avatar-block">
+      <div id="avatar-display" class="avatar-circle" data-testid="avatar-display">
+        {% if avatar_b64 %}<img src="data:{{ avatar_mime }};base64,{{ avatar_b64 }}" />{% else %}<span>{{ username[0]|upper }}</span>{% endif %}
+      </div>
+      <form id="avatar-form" enctype="multipart/form-data" class="inline-form">
+        <input type="file" name="image" accept="image/*" data-testid="avatar-file" />
+        <button type="submit" data-testid="avatar-upload-button">Upload</button>
+      </form>
+    </div>
+    <div class="profile-info">
+      <h1 data-testid="profile-username">@{{ username }}</h1>
+      <p class="muted">Phone: <span data-testid="profile-phone">{{ phone }}</span></p>
+      <p class="muted">Followers: <b data-testid="profile-followers-count">{{ followers }}</b> · Following: <b data-testid="profile-following-count">{{ following }}</b></p>
+    </div>
+  </div>
 
-  <h2>{{ 'Change' if pin_enabled else 'Set' }} 2FA PIN</h2>
+  <h2>Edit profile</h2>
+  <form id="profile-form" data-testid="profile-edit-form" autocomplete="off">
+    <label>Display name</label>
+    <input name="display_name" data-testid="profile-display-name" maxlength="60" value="{{ display_name }}" />
+    <label>Bio (max 280 chars)</label>
+    <textarea name="bio" data-testid="profile-bio" maxlength="280">{{ bio }}</textarea>
+    <button type="submit" data-testid="profile-save-button">Save</button>
+    <p id="profile-msg" data-testid="profile-msg"></p>
+  </form>
+
+  <h2>Privacy</h2>
+  <label class="checkbox">
+    <input type="checkbox" id="ghost-toggle" data-testid="ghost-toggle" {% if search_hidden %}checked{% endif %} />
+    Hide my account from global search (Ghost mode)
+  </label>
+  <p class="muted small">When enabled, your profile is hidden from search and only visible to users who already follow you.</p>
+
+  <h2>2FA PIN</h2>
+  <p>2FA PIN: <span data-testid="pin-status">{{ 'Enabled' if pin_enabled else 'Disabled' }}</span></p>
   <form id="set-pin-form" data-testid="set-pin-form" autocomplete="off">
-    <label>New 6-digit PIN</label>
+    <label>{{ 'Change' if pin_enabled else 'Set' }} 6-digit PIN</label>
     <input name="pin" data-testid="new-pin-input" required pattern="[0-9]{6}" maxlength="6" inputmode="numeric" />
     <button type="submit" data-testid="set-pin-button">Save PIN</button>
     <p id="set-pin-msg" data-testid="set-pin-msg"></p>
   </form>
+
+  <h2>Lists &amp; archives</h2>
+  <div class="link-row">
+    <a class="link-tile" href="/api/pages/close-friends" data-testid="link-close-friends">Close Friends</a>
+    <a class="link-tile" href="/api/pages/blocks" data-testid="link-blocks">Blocked Users</a>
+    <a class="link-tile" href="/api/pages/archive" data-testid="link-archive">Story Archive</a>
+  </div>
+
+  <h2 class="danger">Danger zone</h2>
+  <button id="soft-delete-btn" class="danger-btn" data-testid="soft-delete-button">Delete my account (30-day grace)</button>
+  <p class="muted small">After 30 days your data is permanently removed and your username is reserved 90 days.</p>
 </section>
+
 <script>
+const csrfHdr = async () => ({ 'X-CSRF-Token': await window.ensureCsrf(), 'Content-Type': 'application/json' });
+
+document.getElementById('profile-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const f = new FormData(e.target);
+  const out = await window.api('/api/users/me', 'PATCH', {
+    display_name: f.get('display_name'),
+    bio: f.get('bio'),
+  });
+  const m = document.getElementById('profile-msg');
+  m.textContent = out.ok ? 'Saved.' : (out.detail || 'Failed');
+  m.className = out.ok ? 'ok' : 'err';
+});
+
+document.getElementById('avatar-form').addEventListener('submit', async (e) => {
+  e.preventDefault();
+  const out = await window.apiUpload('/api/users/me/avatar', new FormData(e.target));
+  if (out.ok) location.reload();
+});
+
+document.getElementById('ghost-toggle').addEventListener('change', async (e) => {
+  await window.api('/api/users/me/visibility', 'PUT', { hidden: e.target.checked });
+});
+
 document.getElementById('set-pin-form').addEventListener('submit', async (e) => {
   e.preventDefault();
   const f = new FormData(e.target);
@@ -22,6 +89,17 @@ document.getElementById('set-pin-form').addEventListener('submit', async (e) => 
   const msg = document.getElementById('set-pin-msg');
   msg.textContent = out.ok ? '2FA PIN saved.' : (out.detail || 'Failed');
   msg.className = out.ok ? 'ok' : 'err';
+});
+
+document.getElementById('soft-delete-btn').addEventListener('click', async () => {
+  if (!confirm('Delete your account? You have 30 days to change your mind by contacting support; after that everything is permanently wiped.')) return;
+  const out = await window.api('/api/users/me/delete', 'POST');
+  if (out.ok) {
+    alert('Account scheduled for deletion. You will be logged out.');
+    location.href = '/api/pages/login';
+  } else {
+    alert(out.detail || 'Failed');
+  }
 });
 </script>
 {% endblock %}

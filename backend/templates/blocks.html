@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Blocked Users · OMNIX{% endblock %}
+{% block content %}
+<section class="profile-card">
+  <h1>Blocked Users</h1>
+  <p class="muted">Blocked users cannot see your profile, follow you, or contact you. You will not see their content.</p>
+  <div id="blocks-list" class="user-list" data-testid="blocks-list"></div>
+</section>
+
+<script>
+async function load() {
+  const out = await window.api('/api/users/me/blocks', 'GET');
+  const el = document.getElementById('blocks-list');
+  const items = out.data?.blocked || [];
+  el.innerHTML = items.length ? '' : '<p class="muted" data-testid="blocks-empty">You haven\'t blocked anyone.</p>';
+  for (const u of items) {
+    const row = document.createElement('div');
+    row.className = 'user-row';
+    row.dataset.testid = 'block-row-' + u.username;
+    row.innerHTML = `
+      <div class="avatar-tiny" data-letter="${u.username[0].toUpperCase()}"></div>
+      <div class="user-meta"><span class="username">@${u.username}</span></div>
+      <button data-username="${u.username}" data-testid="unblock-${u.username}">Unblock</button>
+    `;
+    el.appendChild(row);
+  }
+  el.querySelectorAll('button').forEach(b => {
+    b.onclick = async () => {
+      const r = await window.api(`/api/users/${b.dataset.username}/block`, 'DELETE');
+      if (r.ok) load();
+    };
+  });
+}
+load();
+</script>
+{% endblock %}

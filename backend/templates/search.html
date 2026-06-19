@@ -1,0 +1,53 @@
+{% extends "base.html" %}
+{% block title %}Search · OMNIX{% endblock %}
+{% block content %}
+<section class="search-card">
+  <h1>Search users</h1>
+  <form action="/api/pages/search" method="get" class="inline-form">
+    <input name="q" data-testid="search-input" placeholder="Username, display name, or bio…" value="{{ q }}" required minlength="1" />
+    <button type="submit" data-testid="search-button">Search</button>
+  </form>
+  <div id="search-results" class="results" data-testid="search-results">
+    {% if not q %}<p class="muted">Type a query above to find people.</p>{% endif %}
+  </div>
+</section>
+
+<script>
+const QUERY = {{ q | tojson }};
+async function runSearch() {
+  if (!QUERY) return;
+  const out = await window.api('/api/users/search/q?q=' + encodeURIComponent(QUERY), 'GET');
+  const list = document.getElementById('search-results');
+  list.innerHTML = '';
+  if (!out.ok || !(out.data.results || []).length) {
+    list.innerHTML = '<p class="muted" data-testid="search-empty">No users matched.</p>';
+    return;
+  }
+  for (const u of out.data.results) {
+    const row = document.createElement('div');
+    row.className = 'user-row';
+    row.dataset.testid = 'search-row-' + u.username;
+    const avatarHtml = u.avatar_b64
+      ? `<img class="avatar-tiny" src="data:${u.avatar_mime};base64,${u.avatar_b64}"/>`
+      : `<div class="avatar-tiny" data-letter="${u.username[0].toUpperCase()}"></div>`;
+    row.innerHTML = `
+      ${avatarHtml}
+      <div class="user-meta">
+        <a class="username" href="/api/pages/user/${u.username}" data-testid="goto-${u.username}">@${u.username}</a>
+        <div class="muted small">${(u.display_name || '')} — ${(u.bio || '').replace(/</g, '&lt;')}</div>
+      </div>
+      <button class="follow-btn" data-username="${u.username}" data-testid="follow-${u.username}">Follow</button>
+    `;
+    list.appendChild(row);
+  }
+  list.querySelectorAll('.follow-btn').forEach(btn => {
+    btn.onclick = async () => {
+      const out = await window.api(`/api/users/${btn.dataset.username}/follow`, 'POST');
+      btn.textContent = out.ok ? 'Following ✓' : (out.detail || 'Failed');
+      btn.disabled = out.ok;
+    };
+  });
+}
+runSearch();
+</script>
+{% endblock %}

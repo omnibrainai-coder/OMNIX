@@ -1,0 +1,36 @@
+{% extends "base.html" %}
+{% block title %}Story Archive · OMNIX{% endblock %}
+{% block content %}
+<section class="profile-card">
+  <h1>Story Archive</h1>
+  <p class="muted">Stories that have passed their 24-hour window. Only you can see this archive.</p>
+  <div id="archive-grid" class="archive-grid" data-testid="archive-grid"></div>
+</section>
+<script>
+async function load() {
+  const out = await window.api('/api/stories/archive', 'GET');
+  const grid = document.getElementById('archive-grid');
+  const items = out.data?.archived || [];
+  grid.innerHTML = items.length ? '' : '<p class="muted" data-testid="archive-empty">Nothing archived yet.</p>';
+  for (const s of items) {
+    const cell = document.createElement('div');
+    cell.className = 'archive-cell';
+    cell.dataset.testid = 'archive-' + s.id;
+    cell.innerHTML = `
+      <img src="data:${s.image_mime};base64,${s.image_b64}" />
+      <div class="muted small">${new Date(s.created_at).toLocaleString()}</div>
+      <button class="danger-btn" data-id="${s.id}" data-testid="archive-delete-${s.id}">Delete</button>
+    `;
+    grid.appendChild(cell);
+  }
+  grid.querySelectorAll('button').forEach(b => {
+    b.onclick = async () => {
+      if (!confirm('Permanently delete this story?')) return;
+      const r = await window.api('/api/stories/' + b.dataset.id, 'DELETE');
+      if (r.ok) load();
+    };
+  });
+}
+load();
+</script>
+{% endblock %}

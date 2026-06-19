@@ -56,6 +56,7 @@ async function apiUpload(path, formData) {
 
 window.api = api;
 window.apiUpload = apiUpload;
+window.ensureCsrf = ensureCsrf;
 
 window.loadFeedAndStories = async function () {
   const [feedRes, storyRes] = await Promise.all([

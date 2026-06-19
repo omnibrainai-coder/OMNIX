@@ -8,11 +8,15 @@
 </head>
 <body>
   <header class="topbar">
-    <a href="/api/pages/home" class="brand">OMNIX</a>
-    <nav>
-      <a href="/api/pages/home">Home</a>
-      <a href="/api/pages/chat">Chat</a>
-      <a href="/api/pages/profile">Profile</a>
+    <a href="/api/pages/home" class="brand" data-testid="brand-link">OMNIX</a>
+    <form class="topbar-search" action="/api/pages/search" method="get" role="search">
+      <input name="q" type="search" placeholder="Search users…" data-testid="topbar-search-input" />
+      <button type="submit" data-testid="topbar-search-button">Go</button>
+    </form>
+    <nav class="topbar-nav">
+      <a href="/api/pages/home" data-testid="nav-home">Home</a>
+      <a href="/api/pages/chat" data-testid="nav-chat">Chat</a>
+      <a href="/api/pages/profile" data-testid="nav-profile">Profile</a>
       <a href="#" id="logout-link" data-testid="logout-link">Logout</a>
     </nav>
   </header>
