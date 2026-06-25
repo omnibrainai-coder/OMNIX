@@ -16,7 +16,7 @@ from slowapi.middleware import SlowAPIMiddleware
 
 from config import settings
 from db import ensure_indexes, close_client
-from routers import auth, pages, posts, stories, chat, users, legal
+from routers import auth, pages, posts, stories, chat, users, legal, moderation
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(name)s :: %(message)s")
 log = logging.getLogger("server")
@@ -87,6 +87,7 @@ app.include_router(stories.router)
 app.include_router(chat.router)
 app.include_router(users.router)
 app.include_router(legal.router)
+app.include_router(moderation.router)
 
 
 # ---------- Per-route stricter limits via dependency ----------
@@ -102,6 +103,20 @@ async def health(request: Request):
 @app.on_event("startup")
 async def on_startup():
     await ensure_indexes()
+    # Bootstrap a moderator from env (idempotent)
+    import os
+    from db import get_db
+    boot = os.environ.get("BOOTSTRAP_MODERATOR_USERNAME", "").strip().lower()
+    if boot:
+        db = get_db()
+        r = await db.users.update_one(
+            {"username": boot},
+            {"$set": {"is_moderator": True}},
+        )
+        if r.matched_count:
+            log.info(f"Bootstrap moderator set: @{boot}")
+        else:
+            log.warning(f"BOOTSTRAP_MODERATOR_USERNAME=@{boot} not found in users")
     log.info("Indexes ensured. Server ready.")
 
 

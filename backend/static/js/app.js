@@ -110,3 +110,64 @@ document.addEventListener('click', async (e) => {
     location.href = '/api/pages/login';
   }
 });
+
+// ---------- Report content modal (shared helper) ----------
+window.openReportModal = function (targetType, targetId, label) {
+  // Remove any existing modal
+  document.getElementById('report-modal-overlay')?.remove();
+  const reasons = [
+    ['spam', 'Spam or scam'],
+    ['harassment', 'Harassment or bullying'],
+    ['hate', 'Hate speech'],
+    ['nudity', 'Nudity or sexual content'],
+    ['violence', 'Violence or threats'],
+    ['self_harm', 'Self-harm'],
+    ['csam', 'Child sexual abuse material'],
+    ['impersonation', 'Impersonation'],
+    ['other', 'Other (please describe)'],
+  ];
+  const overlay = document.createElement('div');
+  overlay.id = 'report-modal-overlay';
+  overlay.className = 'modal-overlay';
+  overlay.dataset.testid = 'report-modal';
+  overlay.innerHTML = `
+    <div class="modal-card">
+      <h2>Report ${targetType}</h2>
+      <p class="muted small">${label || ''}</p>
+      <form id="report-form" data-testid="report-form">
+        <label>Reason</label>
+        <select name="reason" data-testid="report-reason" required>
+          ${reasons.map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}
+        </select>
+        <label>Additional details (optional)</label>
+        <textarea name="details" data-testid="report-details" maxlength="500"></textarea>
+        <div class="modal-actions">
+          <button type="button" id="report-cancel" data-testid="report-cancel">Cancel</button>
+          <button type="submit" class="danger-btn" data-testid="report-submit">Submit report</button>
+        </div>
+        <p id="report-msg" data-testid="report-msg"></p>
+      </form>
+    </div>
+  `;
+  document.body.appendChild(overlay);
+  overlay.querySelector('#report-cancel').onclick = () => overlay.remove();
+  overlay.querySelector('#report-form').onsubmit = async (e) => {
+    e.preventDefault();
+    const f = new FormData(e.target);
+    const out = await window.api('/api/reports', 'POST', {
+      target_type: targetType,
+      target_id: targetId,
+      reason: f.get('reason'),
+      details: f.get('details') || '',
+    });
+    const m = overlay.querySelector('#report-msg');
+    if (out.ok) {
+      m.textContent = out.data.deduped ? 'You already reported this — thanks.' : 'Report submitted. Thanks for keeping OMNIX safe.';
+      m.className = 'ok';
+      setTimeout(() => overlay.remove(), 1400);
+    } else {
+      m.textContent = out.detail || 'Failed';
+      m.className = 'err';
+    }
+  };
+};

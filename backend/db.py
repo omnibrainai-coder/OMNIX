@@ -73,6 +73,13 @@ async def ensure_indexes():
     await db.tombstones.create_index("released_at")
     await db.revoked_tokens.create_index("revoked_at", expireAfterSeconds=86400 * 8)
 
+    # ---------- moderation ----------
+    await db.reports.create_index([("status", 1), ("created_at", 1)])
+    await db.reports.create_index("reporter_id")
+    await db.reports.create_index([("target_type", 1), ("target_id", 1)])
+    await db.users.create_index("is_moderator", sparse=True)
+    await db.users.create_index("banned", sparse=True)
+
 
 def close_client():
     global _client

@@ -203,3 +203,22 @@ async def archive_page(request: Request):
     resp = templates.TemplateResponse("archive.html", {"request": request})
     ensure_csrf_cookie(request, resp)
     return resp
+
+
+# ---------- Moderation dashboard (moderators only) ----------
+@router.get("/moderation", response_class=HTMLResponse)
+async def moderation_page(request: Request):
+    user = await _require_auth(request)
+    if not user:
+        return RedirectResponse(url="/api/pages/login", status_code=302)
+    if not user.get("is_moderator"):
+        # Render the same template; client-side load will show the 403 error.
+        # Render a simple gated page instead.
+        resp = templates.TemplateResponse(
+            "moderation.html", {"request": request}, status_code=403,
+        )
+        ensure_csrf_cookie(request, resp)
+        return resp
+    resp = templates.TemplateResponse("moderation.html", {"request": request})
+    ensure_csrf_cookie(request, resp)
+    return resp

@@ -1,0 +1,88 @@
+{% extends "base.html" %}
+{% block title %}Moderation · OMNIX{% endblock %}
+{% block content %}
+<section class="profile-card">
+  <h1>Moderation Queue</h1>
+  <p class="muted">Reports submitted by users. Review and take action.</p>
+
+  <div class="mod-tabs" data-testid="mod-tabs">
+    <button class="mod-tab active" data-status="pending" data-testid="mod-tab-pending">Pending</button>
+    <button class="mod-tab" data-status="actioned" data-testid="mod-tab-actioned">Actioned</button>
+    <button class="mod-tab" data-status="dismissed" data-testid="mod-tab-dismissed">Dismissed</button>
+    <button class="mod-tab" data-status="all" data-testid="mod-tab-all">All</button>
+  </div>
+
+  <div id="mod-stats" class="muted small" data-testid="mod-stats"></div>
+  <div id="mod-queue" class="user-list" data-testid="mod-queue"></div>
+</section>
+
+<script>
+let currentStatus = 'pending';
+
+async function loadStats() {
+  const r = await window.api('/api/moderation/stats', 'GET');
+  if (!r.ok) return;
+  const s = r.data;
+  document.getElementById('mod-stats').textContent =
+    `Pending: ${s.pending} · Actioned: ${s.actioned} · Dismissed: ${s.dismissed} · Total: ${s.total}`;
+}
+
+async function load() {
+  const r = await window.api('/api/moderation/queue?status=' + currentStatus, 'GET');
+  const el = document.getElementById('mod-queue');
+  if (!r.ok) {
+    el.innerHTML = `<p class="err" data-testid="mod-error">${r.detail || 'Forbidden'}</p>`;
+    return;
+  }
+  const items = r.data.reports || [];
+  el.innerHTML = items.length ? '' : '<p class="muted" data-testid="mod-empty">No reports.</p>';
+  for (const rep of items) {
+    const row = document.createElement('div');
+    row.className = 'report-row';
+    row.dataset.testid = 'report-' + rep.id;
+    const tp = rep.target_preview || {};
+    row.innerHTML = `
+      <div class="report-meta">
+        <div><b>${rep.target_type}</b> · ${rep.reason}
+          ${rep.status === 'pending' ? '<span class="badge-pending">pending</span>' : ''}
+          ${rep.status === 'actioned' ? '<span class="badge-actioned">actioned · ' + (rep.action_taken||'') + '</span>' : ''}
+          ${rep.status === 'dismissed' ? '<span class="badge-dismissed">dismissed</span>' : ''}
+        </div>
+        <div class="muted small">reported by @${rep.reporter_username} · ${new Date(rep.created_at).toLocaleString()}</div>
+        <div class="muted small">target: ${tp.summary || '(unknown)'} ${tp.owner_username ? '· owner @'+tp.owner_username : ''}</div>
+        ${rep.details ? `<div class="muted small">"${rep.details.replace(/</g,'&lt;')}"</div>` : ''}
+        ${rep.reviewer_note ? `<div class="muted small">mod note: ${rep.reviewer_note.replace(/</g,'&lt;')}</div>` : ''}
+      </div>
+      ${rep.status === 'pending' ? `
+      <div class="report-actions">
+        <button data-action="dismiss" data-id="${rep.id}" data-testid="dismiss-${rep.id}">Dismiss</button>
+        <button data-action="remove_content" data-id="${rep.id}" data-testid="remove-${rep.id}">Remove content</button>
+        <button data-action="ban_user" data-id="${rep.id}" class="danger-btn" data-testid="ban-${rep.id}">Ban user</button>
+      </div>` : ''}
+    `;
+    el.appendChild(row);
+  }
+  el.querySelectorAll('button[data-action]').forEach(b => {
+    b.onclick = async () => {
+      const action = b.dataset.action;
+      const note = action !== 'dismiss' ? (prompt('Optional note for audit log:') || '') : '';
+      const out = await window.api(`/api/moderation/reports/${b.dataset.id}/action`, 'POST', { action, note });
+      if (out.ok) { await loadStats(); await load(); }
+      else alert(out.detail || 'Failed');
+    };
+  });
+}
+
+document.querySelectorAll('.mod-tab').forEach(t => {
+  t.onclick = () => {
+    document.querySelectorAll('.mod-tab').forEach(x => x.classList.remove('active'));
+    t.classList.add('active');
+    currentStatus = t.dataset.status;
+    load();
+  };
+});
+
+loadStats();
+load();
+</script>
+{% endblock %}

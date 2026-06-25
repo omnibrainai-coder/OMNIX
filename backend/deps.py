@@ -37,6 +37,8 @@ async def get_current_user(request: Request) -> dict:
     user = await _load_user(payload["sub"])
     if not user:
         raise HTTPException(status_code=401, detail="User not found")
+    if user.get("banned") or user.get("deleted_at"):
+        raise HTTPException(status_code=401, detail="Account suspended")
     return user
 
 
