@@ -91,6 +91,10 @@ async def profile():
 async def signup():
     return FileResponse("templates/signup.html")
 
+@app.get("/forgot-password")
+async def forgot_password():
+    return FileResponse("templates/forgot-password.html")
+
 
 # --- Auth API Routes ---
 
