@@ -15,3 +15,16 @@ SessionLocal = sessionmaker(
 )
 
 Base = declarative_base()
+
+# Dependency helper for database sessions
+def get_db():
+    db = SessionLocal()
+    try:
+        yield db
+    finally:
+        db.close()
+
+# Automatically create tables if they don't exist
+def init_db():
+    import models
+    Base.metadata.create_all(bind=engine)

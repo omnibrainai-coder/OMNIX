@@ -1,6 +1,6 @@
-export { Button } from './Button'
-export { Input } from './Input'
-export { Checkbox } from './Checkbox'
-export { Divider } from './Divider'
-export { GlassCard } from './GlassCard'
-export { OtpInput } from './OtpInput'
+export * from './Button';
+export * from './Checkbox';
+export * from './Divider';
+export * from './GlassCard';
+export * from './Input';
+export * from './OtpInput';
