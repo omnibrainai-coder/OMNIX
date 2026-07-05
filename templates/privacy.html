@@ -4,35 +4,39 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OMNIX - Privacy Policy</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { background: #050505; color: #cbd5e1; font-family: "Times New Roman", Times, serif; padding: 40px; line-height: 1.9; text-align: justify; }
-        .legal-container { max-width: 900px; margin: 0 auto; background: #0b0b0d; padding: 50px; border-radius: 12px; border: 1px solid #1e293b; }
-        h1 { color: #1e40af; border-bottom: 3px double #334155; padding-bottom: 15px; font-size: 26px; text-transform: uppercase; }
-        h2 { color: #3b82f6; font-size: 18px; margin-top: 40px; text-transform: uppercase; border-left: 4px solid #1e40af; padding-left: 10px; }
-        p { font-size: 14px; color: #94a3b8; }
-        .critical-clause { color: #38bdf8; font-weight: bold; background: rgba(56, 189, 248, 0.05); padding: 15px; border: 1px solid rgba(56, 189, 248, 0.2); border-radius: 6px; }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: linear-gradient(135deg, #fffef5 0%, #fff2f6 40%, #ebf8ff 70%, #ffffff 100%);
+        }
+        .doc-card {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.7);
+        }
     </style>
 </head>
-<body>
-    <div class="legal-container">
-        <h1>OMNIX PRIVACY POLICY</h1>
-        <p><strong>Last Modified: July 2, 2026</strong></p>
-        
-        <h2>1. Data Minimization and Zero Background Tracking</h2>
-        <p>Omnix enforces strict data boundary protocols. Hardware mechanisms, specifically the device camera arrays, microphone feeds, and location telemetry sensors, operate exclusively within a foreground active execution context. When the application context shifts to the background layer, all hardware listener loops are structurally terminated within a 99.5% operational matrix to prevent any unauthorized background data harvesting.</p>
+<body class="min-h-screen text-gray-800 antialiased p-6 flex flex-col items-center">
 
-        <h2>2. Data Sovereignty and End-to-End Encryption</h2>
-        <p>User message payloads, private communication nodes, and local data interactions managed via the database pipeline are mathematically obfuscated utilizing strict client-side encryption layers. No administrative agent, host provider, or primary application developer maintains a decryption protocol or structural bypass mechanism to access plaintext communication architectures. We strictly enforce a zero-third-party data selling policy.</p>
+    <main class="w-full max-w-xl my-auto">
+        <div class="text-center mb-6">
+            <a href="/login" class="text-xs text-blue-600 hover:underline">← Back to Sign In</a>
+            <h1 class="text-xl font-bold tracking-tight text-black mt-2">Privacy Policy</h1>
+        </div>
 
-        <h2>3. Account Invalidation and Comprehensive Data Deletion</h2>
-        <p class="critical-clause">ACCOUNT DELETION TIMELINE: USERS RETAIN THE UNCONDITIONAL RIGHT TO INITIATE ACCOUNT TERMINATION VIA THE APP SETTINGS. THE ERASURE PROTOCOL TAKES UP TO 24 HOURS TO COMPLETELY PURGE FROM THE PRODUCTION DIRECTORIES.</p>
-        <p>Upon triggering the data erasure sequence, all authentication tokens hosted via the Supabase cluster, relational metadata records, encrypted chat arrays, and individual profile schemas enter a deletion queue. Within a maximum of 24 hours, all records are permanently deleted, and a final automated confirmation email will be dispatched to the user's registered address certifying the successful removal of all personal assets.</p>
+        <div class="doc-card rounded-2xl p-6 shadow-sm space-y-4 text-xs leading-relaxed text-gray-700">
+            <div>
+                <h2 class="font-semibold text-black mb-1">1. Information Collection</h2>
+                <p>We securely collect username, email, and authentication properties to provision your unique profile database mapping.</p>
+            </div>
+            <div>
+                <h2 class="font-semibold text-black mb-1">2. Data Security</h2>
+                <p>All sensitive credentials and interactions are transmitted securely via dynamic REST operations to ensure your isolation layer.</p>
+            </div>
+        </div>
+    </main>
 
-        <h2>4. Data Protection Officer and Grievance Desk</h2>
-        <p>For any privacy-related questions, comprehensive data access requests, or specific grievances regarding your user information ownership, users can contact our dedicated Data Protection desk directly. All compliance inquiries are addressed strictly under structured evaluation metrics at our official support gateway: support@omnix.shadow.</p>
-
-        <h2>5. Policy Updates and Mandatory Notification Manifest</h2>
-        <p>Omnix reserves the right to modify or completely update this Privacy Policy framework to reflect regulatory shifts or architectural patches. Users will be formally notified of any material changes via explicit in-app banners or notification modules before those structural adjustments become officially effective on the network layer.</p>
-    </div>
 </body>
 </html>

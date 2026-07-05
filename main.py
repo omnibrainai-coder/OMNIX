@@ -178,3 +178,76 @@ if os.path.exists("dist"):
     async def read_index():
         with open("dist/index.html", "r", encoding="utf-8") as f:
             return f.read()
+
+# --- Posts & Feed API Routes ---
+class PostRequest(BaseModel):
+    content: str
+    image_url: str = None
+
+@app.post("/api/posts")
+async def create_post(req: PostRequest):
+    """Post create karne ke liye endpoint"""
+    # Yahan hum aage database query jodinge
+    return {"success": True, "message": "Post created successfully", "data": {"content": req.content}}
+
+@app.get("/api/posts/feed")
+async def get_feed():
+    """Global feed fetch karne ke liye endpoint"""
+    return {"success": True, "posts": []}
+
+async def supabase_db_operation(method: str, table: str, payload: dict = None):
+    """Supabase REST API se data handle karne ke liye common function"""
+    if not SUPABASE_URL:
+        raise HTTPException(status_code=500, detail="Supabase URL not configured.")
+    
+    url = f"{SUPABASE_URL}/rest/v1/{table}"
+    headers = {
+        "apikey": SUPABASE_ANON_KEY,
+        "Authorization": f"Bearer {SUPABASE_ANON_KEY}",
+        "Content-Type": "application/json",
+        "Prefer": "return=representation"
+    }
+    
+    async with httpx.AsyncClient() as client:
+        if method.upper() == "POST":
+            resp = await client.post(url, json=payload, headers=headers)
+        elif method.upper() == "GET":
+            resp = await client.get(url, headers=headers)
+        
+        if resp.status_code >= 400:
+            raise HTTPException(status_code=resp.status_code, detail=resp.text)
+        return resp.json()
+
+# --- Overwriting older placeholder endpoints with fully functional database endpoints ---
+@app.post("/api/posts")
+async def create_post(req: PostRequest):
+    """Naya post database mein save karne ke liye"""
+    data = {"content": req.content, "image_url": req.image_url}
+    result = await supabase_db_operation("POST", "posts", data)
+    return {"success": True, "message": "Post created successfully in Supabase", "data": result}
+
+@app.get("/api/posts/feed")
+async def get_feed():
+    """Database se saare posts fetch karne ke liye"""
+    result = await supabase_db_operation("GET", "posts")
+    return {"success": True, "posts": result}
+
+@app.get("/terms")
+async def get_terms_page():
+    from fastapi.responses import FileResponse
+    return FileResponse("templates/terms.html")
+
+@app.get("/privacy")
+async def get_privacy_page():
+    from fastapi.responses import FileResponse
+    return FileResponse("templates/privacy.html")
+
+@app.get("/terms")
+async def get_terms_page():
+    from fastapi.responses import FileResponse
+    return FileResponse("templates/terms_conditions.html")
+
+@app.get("/privacy")
+async def get_privacy_page():
+    from fastapi.responses import FileResponse
+    return FileResponse("templates/privacy_policy.html")

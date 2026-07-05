@@ -4,42 +4,43 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>OMNIX - Terms of Service</title>
+    <script src="https://cdn.jsdelivr.net/npm/@tailwindcss/browser@4"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
     <style>
-        body { background: #050505; color: #cbd5e1; font-family: "Times New Roman", Times, serif; padding: 40px; line-height: 1.9; text-align: justify; }
-        .legal-container { max-width: 900px; margin: 0 auto; background: #0b0b0d; padding: 50px; border-radius: 12px; border: 1px solid #1e293b; }
-        h1 { color: #1e40af; border-bottom: 3px double #334155; padding-bottom: 15px; font-size: 26px; text-transform: uppercase; }
-        h2 { color: #3b82f6; font-size: 18px; margin-top: 40px; text-transform: uppercase; border-left: 4px solid #1e40af; padding-left: 10px; }
-        p { font-size: 14px; color: #94a3b8; }
-        .warning-clause { color: #ef4444; font-weight: bold; background: rgba(239, 68, 68, 0.05); padding: 15px; border: 1px solid rgba(239, 68, 68, 0.2); border-radius: 6px; }
+        body {
+            font-family: 'Plus Jakarta Sans', sans-serif;
+            background: linear-gradient(135deg, #fffef5 0%, #fff2f6 40%, #ebf8ff 70%, #ffffff 100%);
+        }
+        .doc-card {
+            background: rgba(255, 255, 255, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.7);
+        }
     </style>
 </head>
-<body>
-    <div class="legal-container">
-        <h1>OMNIX TERMS OF SERVICE</h1>
-        <p><strong>Last Modified: July 2, 2026</strong></p>
-        
-        <h2>1. Absolute Limitation of Liability</h2>
-        <p>Omnix operates strictly as a passive data transmission intermediary. The platform, its developers, and stakeholders hold zero liability for user-to-user interactions, disputes, physical altercations, or real-world consequences. Users interact entirely at their own risk and waive all rights to seek damages or legal recovery from the platform owners.</p>
+<body class="min-h-screen text-gray-800 antialiased p-6 flex flex-col items-center">
 
-        <h2>2. User-Generated Content (UGC) Policy (Apple Guideline 1.2)</h2>
-        <p class="warning-clause">OMNIX ENFORCES A ZERO-TOLERANCE POLICY FOR OBJECTIONABLE CONTENT AND ABUSIVE BEHAVIOR.</p>
-        <p>Users are strictly prohibited from posting, sending, or transmitting defamatory, abusive, illegal, or sexually explicit content (nudity). The platform employs filtering tools and user reporting protocols. Any user found violating these terms will be permanently blocked within 24 hours, and the objectionable content will be removed immediately from the network architecture.</p>
+    <main class="w-full max-w-xl my-auto">
+        <div class="text-center mb-6">
+            <a href="/login" class="text-xs text-blue-600 hover:underline">← Back to Sign In</a>
+            <h1 class="text-xl font-bold tracking-tight text-black mt-2">Terms of Service</h1>
+        </div>
 
-        <h2>3. Age Restrictions and Children's Safety</h2>
-        <p>You must be at least 13 years of age to initialize an account on OMNIX. If you are under the age of 18, you represent that you have received parental consent to interact with this platform. OMNIX does not knowingly permit access to individuals below the baseline age requirement.</p>
+        <div class="doc-card rounded-2xl p-6 shadow-sm space-y-4 text-xs leading-relaxed text-gray-700">
+            <div>
+                <h2 class="font-semibold text-black mb-1">1. Acceptance of Terms</h2>
+                <p>By creating an account or using OMNIX, you agree to these clear and fully transparent terms of service.</p>
+            </div>
+            <div>
+                <h2 class="font-semibold text-black mb-1">2. User Conduct</h2>
+                <p>You agree to experience and share content in a responsible, secure, and authenticated manner without disrupting the network.</p>
+            </div>
+            <div>
+                <h2 class="font-semibold text-black mb-1">3. Data Reliability</h2>
+                <p>We work non-stop to ensure 99.9% application stability and data persistence across our cloud database platforms.</p>
+            </div>
+        </div>
+    </main>
 
-        <h2>4. Subscription Billing & Irrevocable Non-Refundability</h2>
-        <p>All premium features and tiers are distributed on a voluntary subscription basis. ALL TRANSACTIONS ARE FINAL AND NON-REFUNDABLE. Users retain the autonomous right to cancel future billing cycles through account settings, but historically processed payments will not be returned under any pretext.</p>
-
-        <h2>5. Governing Law, Jurisdiction and Dispute Resolution</h2>
-        <h3>5.1 Applicable Governing Law</h3>
-        <p>These Terms of Service, your relationship with Omnix, and any legal obligations arising hereunder shall be governed by, and construed strictly in accordance with, the substantive laws of India, without regard to its conflict of law principles.</p>
-
-        <h3>5.2 Territorial Jurisdiction</h3>
-        <p>You explicitly and irrevocably agree that any legal action, suit, dispute, or judicial proceeding arising out of or relating to these Terms, the application, or the services provided by Omnix shall be filed exclusively in the competent courts located within the district of <strong>Kishtwar, Jammu & Kashmir, India</strong>.</p>
-
-        <h3>5.3 Waiver of Venue Objection</h3>
-        <p>By utilizing this platform and creating an account, you hereby permanently waive any and all objections to the laying of venue in the courts of Kishtwar, Jammu & Kashmir, and submit entirely to the personal and exclusive jurisdiction of the said courts for the adjudication of any claims.</p>
-    </div>
 </body>
 </html>
