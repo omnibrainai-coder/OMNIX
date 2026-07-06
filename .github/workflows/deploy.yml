@@ -1,0 +1,13 @@
+name: Deploy OMNIX Application
+
+on:
+  push:
+    branches:
+      - main
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger deployment status
+        run: echo "Code pushed to main branch. Running setup updates."
