@@ -11,32 +11,61 @@
             font-family: 'Plus Jakarta Sans', sans-serif;
             background: linear-gradient(135deg, #fffef5 0%, #fff2f6 40%, #ebf8ff 70%, #ffffff 100%);
         }
-        .doc-card {
-            background: rgba(255, 255, 255, 0.6);
-            backdrop-filter: blur(12px);
-            border: 1px solid rgba(255, 255, 255, 0.7);
+        .luxury-transparent {
+            background: rgba(255, 255, 255, 0.45);
+            backdrop-filter: blur(14px);
+            border: 1px solid rgba(255, 255, 255, 0.6);
+            box-shadow: 0 8px 32px 0 rgba(31, 38, 135, 0.04);
         }
     </style>
 </head>
-<body class="min-h-screen text-gray-800 antialiased p-6 flex flex-col items-center">
+<body class="min-h-screen flex flex-col justify-between text-gray-800 antialiased p-4">
 
-    <main class="w-full max-w-xl my-auto">
-        <div class="text-center mb-6">
-            <a href="/login" class="text-xs text-blue-600 hover:underline">← Back to Sign In</a>
-            <h1 class="text-xl font-bold tracking-tight text-black mt-2">Privacy Policy</h1>
+    <div></div>
+
+    <main class="w-full flex flex-col items-center justify-center my-auto">
+        <div class="text-center mb-4">
+            <span class="text-xl font-bold tracking-widest text-black">OMNIX</span>
         </div>
 
-        <div class="doc-card rounded-2xl p-6 shadow-sm space-y-4 text-xs leading-relaxed text-gray-700">
-            <div>
-                <h2 class="font-semibold text-black mb-1">1. Information Collection</h2>
-                <p>We securely collect username, email, and authentication properties to provision your unique profile database mapping.</p>
+        <div class="w-full max-w-[340px] luxury-transparent rounded-2xl p-5">
+            <h1 class="text-base font-bold tracking-tight text-black mb-4 text-center">Privacy Policy</h1>
+
+            <div class="space-y-4 text-xs leading-relaxed text-gray-700 max-h-[320px] overflow-y-auto pr-2">
+                <div>
+                    <h2 class="font-semibold text-black mb-1">1. Information Collection</h2>
+                    <p>We securely collect username, email, and authentication properties to provision your unique profile database mapping. We collect only what is necessary for service delivery.</p>
+                </div>
+                <div>
+                    <h2 class="font-semibold text-black mb-1">2. Data Security</h2>
+                    <p>All sensitive credentials and interactions are transmitted securely via encrypted REST operations. Your data is protected with industry-standard encryption at rest and in transit.</p>
+                </div>
+                <div>
+                    <h2 class="font-semibold text-black mb-1">3. Data Usage</h2>
+                    <p>We use your information solely for providing and improving our services. We never sell, rent, or share your personal data with third parties for marketing purposes.</p>
+                </div>
+                <div>
+                    <h2 class="font-semibold text-black mb-1">4. Data Retention</h2>
+                    <p>Your data is retained only as long as necessary to provide our services. Upon account deletion, your personal data is securely removed within 30 days.</p>
+                </div>
+                <div>
+                    <h2 class="font-semibold text-black mb-1">5. Your Rights</h2>
+                    <p>You have the right to access, correct, or delete your personal data at any time. Contact us for data export requests or account deletion.</p>
+                </div>
             </div>
-            <div>
-                <h2 class="font-semibold text-black mb-1">2. Data Security</h2>
-                <p>All sensitive credentials and interactions are transmitted securely via dynamic REST operations to ensure your isolation layer.</p>
+
+            <div class="mt-4 pt-3 border-t border-gray-200 text-center">
+                <a href="/" class="text-blue-600 font-medium hover:underline text-xs">← Back to Sign In</a>
             </div>
         </div>
     </main>
 
+    <footer class="w-full max-w-xs mx-auto text-center space-y-1 text-[9px] text-gray-400 pb-2">
+        <div class="flex justify-center space-x-3 text-gray-400">
+            <a href="/terms" class="hover:text-gray-600">Terms of Service</a>
+            <span>·</span>
+            <a href="/privacy" class="hover:text-gray-600 font-medium">Privacy Policy</a>
+        </div>
+    </footer>
 </body>
 </html>

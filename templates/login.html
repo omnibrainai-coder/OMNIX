@@ -46,7 +46,7 @@
                     <div class="flex-grow border-t border-gray-200"></div>
                 </div>
 
-                <button type="button" onclick="window.location.href='/api/auth/google'" class="w-full bg-white border border-gray-200 text-gray-700 font-medium rounded-xl py-2 text-xs flex items-center justify-center gap-2 hover:bg-gray-50 active:scale-[0.99] transition-all cursor-pointer shadow-sm">
+                <button type="button" onclick="handleGoogleSignIn()" class="w-full bg-white border border-gray-200 text-gray-700 font-medium rounded-xl py-2 text-xs flex items-center justify-center gap-2 hover:bg-gray-50 active:scale-[0.99] transition-all cursor-pointer shadow-sm">
                     <svg class="w-3.5 h-3.5" viewBox="0 0 24 24">
                         <path fill="#4285F4" d="M23.745 12.27c0-.7-.06-1.4-.19-2.07H12v3.92h6.61c-.29 1.53-1.14 2.82-2.4 3.68v3.05h3.88c2.27-2.09 3.65-5.17 3.65-8.58z"/>
                         <path fill="#34A853" d="M12 24c3.24 0 5.95-1.08 7.93-2.91l-3.88-3.05c-1.08.72-2.45 1.16-4.05 1.16-3.11 0-5.74-2.11-6.68-4.96H1.21v3.15C3.18 21.88 7.31 24 12 24z"/>
@@ -74,6 +74,19 @@
     </footer>
 
     <script>
+        async function handleGoogleSignIn() {
+            try {
+                const response = await fetch('/api/auth/google');
+                const data = await response.json();
+                if (data.redirect_url) {
+                    window.location.href = data.redirect_url;
+                }
+            } catch (err) {
+                document.getElementById('errorMessage').innerText = "Google sign-in unavailable";
+                document.getElementById('errorMessage').classList.remove('hidden');
+            }
+        }
+
         document.getElementById('loginForm').addEventListener('submit', async (e) => {
             e.preventDefault();
             const identity = document.getElementById('identity').value;
@@ -92,7 +105,7 @@
                     localStorage.setItem('access_token', data.access_token);
                     window.location.href = '/home';
                 } else {
-                    errDiv.innerText = data.message || "Invalid credentials";
+                    errDiv.innerText = data.detail || data.message || "Invalid credentials";
                     errDiv.classList.remove('hidden');
                 }
             } catch (err) {

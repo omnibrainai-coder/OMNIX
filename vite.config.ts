@@ -8,7 +8,9 @@ export default defineConfig({
     alias: {
       '@': path.resolve(__dirname, './src'),
       '@pages': path.resolve(__dirname, './src/pages'),
-      '@components': path.resolve(__dirname, './src/components')
+      '@components': path.resolve(__dirname, './src/components'),
+      '@utils': path.resolve(__dirname, './src/utils'),
+      '@config': path.resolve(__dirname, './src/config'),
     }
   },
   server: {
@@ -18,5 +20,23 @@ export default defineConfig({
     hmr: {
       overlay: false
     }
-  }
+  },
+  build: {
+    outDir: 'dist',
+    sourcemap: false,
+    minify: 'esbuild',
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-icons': ['lucide-react'],
+        },
+      },
+    },
+    chunkSizeWarningLimit: 500,
+  },
+  define: {
+    'process.env.NODE_ENV': JSON.stringify('production'),
+  },
 });
