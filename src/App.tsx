@@ -1,5 +1,9 @@
-import Login from "./pages/Login";
+import { Login } from "./pages/Login";
 
 export default function App() {
-  return <Login />;
+  const handleNavigate = (page: string) => {
+    console.log('Navigate to:', page);
+  };
+
+  return <Login onNavigate={handleNavigate} />;
 }

@@ -1,3 +1,26 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+@theme {
+  --color-shadow-bg: #030508;
+  --color-shadow-surface: #080d12;
+  --color-shadow-card: #0d1420;
+  --color-shadow-input: #0a111a;
+  --color-shadow-primary: #00d4ff;
+  --color-shadow-primary-glow: rgba(0,212,255,0.35);
+  --color-shadow-secondary: #00ff9d;
+  --color-shadow-accent: #00d4ff;
+  --color-shadow-error: #ff3060;
+  --color-shadow-success: #00ff9d;
+  --color-shadow-warn: #ff6b35;
+  --font-family-mono: 'Share Tech Mono', monospace;
+  --font-family-head: 'Rajdhani', sans-serif;
+  --font-family-body: 'Inter', sans-serif;
+}
+
+@layer base {
+  body {
+    font-family: var(--font-family-body);
+    background-color: var(--color-shadow-bg);
+    color: white;
+  }
+}
