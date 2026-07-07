@@ -1,5 +1,6 @@
 import { motion } from 'framer-motion';
-import { Hop as HomeIcon, Search, CirclePlus as PlusCircle, MessageCircle, User } from 'lucide-react';
+import { Hop as HomeIcon, Search, CirclePlus as PlusCircle, MessageCircle, User, LogOut } from 'lucide-react';
+import { cn } from '@/utils/cn';
 
 interface HomeProps {
   user?: {
@@ -10,152 +11,153 @@ interface HomeProps {
 }
 
 export function Home({ user, onNavigate }: HomeProps) {
-  const container = {
-    hidden: { opacity: 0 },
-    show: {
-      opacity: 1,
-      transition: { staggerChildren: 0.1 },
-    },
-  };
-
-  const item = {
-    hidden: { opacity: 0, y: 20 },
-    show: { opacity: 1, y: 0 },
+  const handleLogout = () => {
+    localStorage.removeItem('user');
+    localStorage.removeItem('access_token');
+    localStorage.removeItem('refresh_token');
+    onNavigate('login');
   };
 
   return (
-    <div className="min-h-screen bg-shadow-bg pb-20">
+    <div className="min-h-screen w-full bg-[#0B0C10] pb-24">
       {/* Header */}
-      <motion.header
-        variants={container}
-        initial="hidden"
-        animate="show"
-        className="sticky top-0 z-50 bg-shadow-surface/80 backdrop-blur-xl border-b border-white/10 px-4 py-3"
-      >
-        <motion.div variants={item} className="flex items-center justify-between">
-          <h1 className="text-xl font-light tracking-[0.2em] text-white font-[Share_Tech_Mono]">
+      <header className="sticky top-0 z-50 bg-[#0F1015]/90 backdrop-blur-xl border-b border-white/10">
+        <div className="px-4 py-3 flex items-center justify-between">
+          <h1 className="text-xl font-light tracking-[0.2em] text-white font-['Share_Tech_Mono',monospace]">
             SHADOW
           </h1>
-          <div className="flex items-center gap-2">
-            <span className="px-3 py-1 rounded-full bg-shadow-primary/20 text-shadow-primary text-[10px] font-mono tracking-wider">
+          <div className="flex items-center gap-3">
+            <span className="px-3 py-1 rounded-full bg-pink-500/20 text-pink-400 text-[10px] font-mono tracking-wider border border-pink-500/30">
               LIVE
             </span>
+            <button
+              onClick={handleLogout}
+              className="text-white/40 hover:text-white/80 transition-colors"
+            >
+              <LogOut className="w-5 h-5" />
+            </button>
           </div>
-        </motion.div>
-      </motion.header>
+        </div>
+      </header>
 
-      {/* Welcome message */}
-      <motion.div
-        variants={container}
-        initial="hidden"
-        animate="show"
-        className="px-4 py-6"
-      >
-        <motion.div variants={item} className="text-center mb-6">
-          <div className="w-16 h-16 mx-auto rounded-full bg-gradient-to-br from-shadow-primary to-shadow-secondary flex items-center justify-center text-black text-2xl font-bold mb-3">
-            {user?.username?.charAt(0).toUpperCase() || 'U'}
+      {/* Main Content */}
+      <div className="px-4 py-6 space-y-6">
+        {/* User Profile Card */}
+        <div className="bg-[#0F1015]/60 backdrop-blur-xl border border-pink-500/30 rounded-2xl p-6 shadow-[0_0_15px_rgba(236,72,153,0.2)]">
+          <div className="flex flex-col items-center text-center">
+            {/* Avatar */}
+            <div className="w-20 h-20 rounded-full bg-gradient-to-br from-pink-500 to-purple-500 flex items-center justify-center text-white text-2xl font-bold mb-4 ring-2 ring-pink-500/50 ring-offset-2 ring-offset-[#0B0C10]">
+              {user?.username?.charAt(0).toUpperCase() || 'U'}
+            </div>
+
+            {/* User Info */}
+            <h2 className="text-xl font-medium text-white">
+              {user?.username || 'User'}
+            </h2>
+            <p className="text-sm text-white/40 mt-1">
+              {user?.email || 'Welcome to Shadow'}
+            </p>
           </div>
-          <h2 className="text-lg font-medium text-white">
-            Welcome, {user?.username || 'User'}
-          </h2>
-          <p className="text-sm text-white/40 mt-1">
-            Your private social feed awaits
-          </p>
-        </motion.div>
+        </div>
 
         {/* Stats Grid */}
-        <motion.div variants={item} className="grid grid-cols-3 gap-2 mb-6">
-          <div className="bg-shadow-card/60 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center">
-            <div className="text-2xl font-mono text-shadow-primary">0</div>
+        <div className="grid grid-cols-3 gap-3">
+          <div className="bg-[#0F1015]/60 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center">
+            <div className="text-2xl font-bold text-pink-400">0</div>
             <div className="text-[10px] text-white/40 uppercase tracking-wider mt-1">Posts</div>
           </div>
-          <div className="bg-shadow-card/60 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center">
-            <div className="text-2xl font-mono text-shadow-primary">0</div>
+          <div className="bg-[#0F1015]/60 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center">
+            <div className="text-2xl font-bold text-pink-400">0</div>
             <div className="text-[10px] text-white/40 uppercase tracking-wider mt-1">Followers</div>
           </div>
-          <div className="bg-shadow-card/60 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center">
-            <div className="text-2xl font-mono text-shadow-primary">0</div>
+          <div className="bg-[#0F1015]/60 backdrop-blur-xl border border-white/10 rounded-xl p-4 text-center">
+            <div className="text-2xl font-bold text-pink-400">0</div>
             <div className="text-[10px] text-white/40 uppercase tracking-wider mt-1">Following</div>
           </div>
-        </motion.div>
+        </div>
 
         {/* OMNI Score */}
-        <motion.div
-          variants={item}
-          className="bg-shadow-card/60 backdrop-blur-xl border border-shadow-primary/30 rounded-xl p-4 mb-6"
-        >
-          <div className="flex items-center justify-between">
-            <div>
-              <div className="text-[10px] text-white/40 uppercase tracking-wider">OMNI Score</div>
-              <div className="text-3xl font-mono text-shadow-primary mt-1">0.0</div>
-            </div>
-            <div className="w-24 h-2 bg-white/10 rounded-full overflow-hidden">
-              <div className="h-full w-0 bg-gradient-to-r from-shadow-primary to-shadow-secondary rounded-full" />
-            </div>
+        <div className="bg-[#0F1015]/60 backdrop-blur-xl border border-pink-500/30 rounded-xl p-5">
+          <div className="flex items-center justify-between mb-3">
+            <div className="text-xs text-white/40 uppercase tracking-wider">OMNI Score</div>
+            <div className="text-2xl font-bold text-pink-400">0.0</div>
           </div>
-        </motion.div>
+          <div className="h-2 bg-white/10 rounded-full overflow-hidden">
+            <div className="h-full w-0 bg-gradient-to-r from-pink-500 to-purple-500 rounded-full" />
+          </div>
+        </div>
 
-        {/* Empty state */}
-        <motion.div
-          variants={item}
-          className="bg-shadow-card/40 border border-white/10 rounded-2xl p-8 text-center"
-        >
-          <div className="w-16 h-16 mx-auto rounded-full bg-shadow-primary/10 flex items-center justify-center mb-4">
-            <PlusCircle className="w-8 h-8 text-shadow-primary" />
+        {/* Empty Feed State */}
+        <div className="bg-[#0F1015]/40 border border-white/10 rounded-2xl p-8 text-center">
+          <div className="w-16 h-16 mx-auto mb-4 rounded-full bg-pink-500/10 flex items-center justify-center">
+            <PlusCircle className="w-8 h-8 text-pink-400" />
           </div>
           <h3 className="text-lg font-medium text-white mb-2">No posts yet</h3>
           <p className="text-sm text-white/40 mb-4">
-            Create your first post to get started
+            Your feed is empty. Create your first post to get started!
           </p>
           <button
             onClick={() => onNavigate('create')}
-            className="px-6 py-2 bg-gradient-to-r from-shadow-primary to-cyan-400 text-black font-semibold text-sm rounded-lg"
+            className="px-6 py-2 bg-gradient-to-r from-pink-500 to-pink-400 text-white font-semibold text-sm rounded-xl hover:shadow-[0_0_20px_rgba(236,72,153,0.4)] transition-all duration-200"
           >
             Create Post
           </button>
-        </motion.div>
-      </motion.div>
+        </div>
+      </div>
 
       {/* Bottom Navigation */}
-      <nav className="fixed bottom-0 left-0 right-0 bg-shadow-surface/90 backdrop-blur-xl border-t border-white/10 z-50">
-        <div className="flex items-center justify-around py-2">
-          <button
+      <nav className="fixed bottom-0 left-0 right-0 bg-[#0F1015]/95 backdrop-blur-xl border-t border-white/10 z-50">
+        <div className="flex items-center justify-around py-3 px-2">
+          <NavButton
+            icon={HomeIcon}
+            label="Home"
+            active
             onClick={() => onNavigate('home')}
-            className="flex flex-col items-center gap-1 text-shadow-primary px-4 py-2"
-          >
-            <HomeIcon className="w-5 h-5" />
-            <span className="text-[10px] font-mono tracking-wider">HOME</span>
-          </button>
-          <button
+          />
+          <NavButton
+            icon={Search}
+            label="Search"
             onClick={() => onNavigate('search')}
-            className="flex flex-col items-center gap-1 text-white/40 hover:text-white/60 transition-colors px-4 py-2"
-          >
-            <Search className="w-5 h-5" />
-            <span className="text-[10px] font-mono tracking-wider">SEARCH</span>
-          </button>
-          <button
+          />
+          <NavButton
+            icon={PlusCircle}
+            label="Create"
             onClick={() => onNavigate('create')}
-            className="flex flex-col items-center gap-1 text-white/40 hover:text-white/60 transition-colors px-4 py-2"
-          >
-            <PlusCircle className="w-5 h-5" />
-            <span className="text-[10px] font-mono tracking-wider">CREATE</span>
-          </button>
-          <button
+          />
+          <NavButton
+            icon={MessageCircle}
+            label="Chat"
             onClick={() => onNavigate('chat')}
-            className="flex flex-col items-center gap-1 text-white/40 hover:text-white/60 transition-colors px-4 py-2"
-          >
-            <MessageCircle className="w-5 h-5" />
-            <span className="text-[10px] font-mono tracking-wider">CHAT</span>
-          </button>
-          <button
+          />
+          <NavButton
+            icon={User}
+            label="Profile"
             onClick={() => onNavigate('profile')}
-            className="flex flex-col items-center gap-1 text-white/40 hover:text-white/60 transition-colors px-4 py-2"
-          >
-            <User className="w-5 h-5" />
-            <span className="text-[10px] font-mono tracking-wider">PROFILE</span>
-          </button>
+          />
         </div>
       </nav>
     </div>
+  );
+}
+
+interface NavButtonProps {
+  icon: React.ComponentType<{ className?: string }>;
+  label: string;
+  active?: boolean;
+  onClick: () => void;
+}
+
+function NavButton({ icon: Icon, label, active, onClick }: NavButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={cn(
+        'flex flex-col items-center gap-1 px-3 py-2 transition-colors',
+        active ? 'text-pink-400' : 'text-white/40 hover:text-white/60'
+      )}
+    >
+      <Icon className="w-5 h-5" />
+      <span className="text-[10px] font-mono tracking-wider">{label.toUpperCase()}</span>
+    </button>
   );
 }
