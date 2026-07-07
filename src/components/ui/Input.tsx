@@ -25,7 +25,7 @@ export function Input({
           'placeholder:text-white/30 outline-none transition-all duration-200',
           'focus:border-shadow-primary focus:shadow-[0_0_0_3px_rgba(0,212,255,0.15)]',
           error ? 'border-red-500' : 'border-white/10',
-          icon && 'pl-12',
+          icon ? 'pl-12' : '',
           className
         )}
         {...props}

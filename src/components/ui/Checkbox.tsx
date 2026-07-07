@@ -25,7 +25,7 @@ export function Checkbox({
             'w-5 h-5 rounded border-2 transition-all duration-200',
             'border-white/20 peer-checked:border-shadow-primary peer-checked:bg-shadow-primary',
             'peer-focus:ring-2 peer-focus:ring-shadow-primary/30',
-            className
+            className ? String(className) : ''
           )}
         >
           <svg
