@@ -1,0 +1,3 @@
+-keep class com.omnix.app.** { *; }
+-keep class com.omnix.billing.** { *; }
+-keep class com.google.firebase.messaging.** { *; }

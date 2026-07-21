@@ -308,7 +308,10 @@ class SignupRequest(BaseModel):
 
 
 class ForgotPasswordRequest(BaseModel):
-    email: EmailStr
+    mode: str = "email"
+    email: Optional[EmailStr] = None
+    country_code: Optional[str] = "+1"
+    phone_number: Optional[str] = None
 
 
 class OtpSendRequest(BaseModel):
@@ -1166,9 +1169,45 @@ async def api_check_auth_availability(request: Request, req: AvailabilityRequest
 @app.post("/api/auth/forgot-password")
 @limiter.limit("2/minute")
 async def api_forgot_password(request: Request, req: ForgotPasswordRequest):
-    """Send password reset email."""
-    await supabase_auth_request("recover", {"email": req.email})
-    return {"success": True, "message": "Password reset email sent successfully."}
+    """Send a password reset link (email) or reset OTP (phone)."""
+    mode = (req.mode or "email").strip().lower()
+    if mode not in {"email", "phone"}:
+        raise HTTPException(status_code=400, detail="mode must be 'email' or 'phone'")
+
+    if mode == "email":
+        if not req.email:
+            raise HTTPException(status_code=400, detail="Email is required for email reset")
+        await supabase_auth_request("recover", {"email": str(req.email)})
+        return {
+            "success": True,
+            "message": "Password reset link sent successfully.",
+        }
+
+    if not req.phone_number:
+        raise HTTPException(status_code=400, detail="Phone number is required for phone reset")
+
+    prune_expired_otp_challenges()
+    phone = normalize_phone(req.country_code or "+1", req.phone_number)
+    otp_code = f"{secrets.randbelow(10**6):06d}"
+    challenge_id = f"otp_{uuid.uuid4().hex}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    otp_challenges[challenge_id] = {
+        "phone": phone,
+        "otp_code": otp_code,
+        "verified": False,
+        "expires_at": expires_at,
+        "purpose": "password_reset",
+    }
+
+    payload: Dict[str, Any] = {
+        "success": True,
+        "challenge_id": challenge_id,
+        "expires_at": expires_at.isoformat(),
+        "message": "Password reset OTP sent successfully.",
+    }
+    if os.getenv("EXPOSE_DEV_OTP", "true").lower() == "true":
+        payload["otp_code"] = otp_code
+    return payload
 
 
 @app.get("/api/auth/me")

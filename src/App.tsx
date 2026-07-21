@@ -1,8 +1,13 @@
 import { AuthContainer } from './pages/AuthContainer';
+import { ErrorTracker } from './components/ErrorTracker';
+import { CrashMonitor } from './components/security/CrashMonitor';
 
 function App() {
   return (
-    <AuthContainer />
+    <ErrorTracker>
+      <CrashMonitor />
+      <AuthContainer />
+    </ErrorTracker>
   );
 }
 

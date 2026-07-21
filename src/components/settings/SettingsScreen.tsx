@@ -1,0 +1,1 @@
+export { SettingsHub as SettingsScreen } from './SettingsHub';
