@@ -3,20 +3,29 @@ OMNIX - Private Social Network Backend
 Production-ready FastAPI application with Supabase integration.
 """
 
-from fastapi import FastAPI, HTTPException, Depends, Request
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi import FastAPI, HTTPException, Depends, Request, Header
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, EmailStr, field_validator
+import asyncio
+import json
 import os
 import httpx
+import uuid
+import secrets
 from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
-from typing import Optional
-from datetime import datetime, timezone
-import json
+from typing import Optional, Dict, List, Any
 import re
+from datetime import datetime, timezone, timedelta
+from backend.services.social_graph import SocialGraphError, social_graph
+from backend.routes.settings_management import router as settings_management_router
+from backend.routes.billing import router as billing_router
+from backend.routes.push_notifications import router as push_notifications_router
+from backend.services.push_notifications import PushNotificationError, push_notification_service
+from backend.routes.zero_knowledge import router as zero_knowledge_router
 
 app = FastAPI(
     title="OMNIX",
@@ -26,9 +35,44 @@ app = FastAPI(
     redoc_url=None
 )
 
+app.include_router(settings_management_router)
+app.include_router(billing_router)
+app.include_router(push_notifications_router)
+app.include_router(zero_knowledge_router)
+
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
 app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
+
+
+@app.middleware("http")
+async def backend_request_guard(request: Request, call_next):
+    request_id = request.headers.get("x-request-id", str(uuid.uuid4()))
+    request.state.request_id = request_id
+    try:
+        response = await call_next(request)
+    except HTTPException:
+        raise
+    except Exception as error:
+        add_admin_log("ERROR", f"Unhandled exception {request_id}: {error}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "detail": "Internal server error", "request_id": request_id},
+        )
+    response.headers["X-Request-Id"] = request_id
+    return response
+
+
+@app.exception_handler(HTTPException)
+async def app_http_exception_handler(request: Request, exc: HTTPException):
+    return JSONResponse(
+        status_code=exc.status_code,
+        content={
+            "success": False,
+            "detail": exc.detail,
+            "request_id": getattr(request.state, "request_id", None),
+        },
+    )
 
 app.add_middleware(
     CORSMiddleware,
@@ -240,6 +284,11 @@ class SignupRequest(BaseModel):
     first_name: Optional[str] = ""
     last_name: Optional[str] = ""
     mobile: Optional[str] = ""
+    display_nickname: Optional[str] = ""
+    phone_country_code: Optional[str] = "+1"
+    phone_number: Optional[str] = ""
+    otp_challenge_id: Optional[str] = ""
+    legal_accepted: Optional[bool] = False
 
     @field_validator('username')
     @classmethod
@@ -262,9 +311,609 @@ class ForgotPasswordRequest(BaseModel):
     email: EmailStr
 
 
+class OtpSendRequest(BaseModel):
+    country_code: str = "+1"
+    phone_number: str
+
+
+class OtpVerifyRequest(BaseModel):
+    challenge_id: str
+    otp_code: str
+
+
+class AvailabilityRequest(BaseModel):
+    email: EmailStr
+    username: str
+
+
 class PostRequest(BaseModel):
     content: str
     image_url: Optional[str] = None
+    visibility: Optional[str] = 'public'
+    location: Optional[str] = 'Secure feed'
+    tags: Optional[List[str]] = []
+
+
+class PostInteractionRequest(BaseModel):
+    interaction_type: str
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class PostCommentRequest(BaseModel):
+    comment: str
+
+
+class StoryCreateRequest(BaseModel):
+    media_name: str
+    media_type: str = 'image'
+    caption: Optional[str] = ''
+    mentions: Optional[List[str]] = []
+    location_name: Optional[str] = ''
+    music_track: Optional[str] = ''
+    overlay_text: Optional[str] = ''
+    overlay_emoji: Optional[str] = ''
+    overlay_x: Optional[float] = 0.5
+    overlay_y: Optional[float] = 0.5
+    overlay_scale: Optional[float] = 1.0
+
+
+class SendMessageRequest(BaseModel):
+    text: Optional[str] = None
+    sender_id: Optional[str] = 'me'
+    sender_name: Optional[str] = 'You'
+    encrypted_payload: Optional[str] = None
+    encryption_nonce: Optional[str] = None
+    sender_ephemeral_public_key: Optional[str] = None
+    recipient_key_id: Optional[str] = None
+    encryption_algorithm: Optional[str] = None
+
+
+class PrivacyUpdateRequest(BaseModel):
+    is_private: bool
+    is_blocked_from_search: Optional[bool] = None
+
+
+class BlockUserRequest(BaseModel):
+    reason: Optional[str] = None
+
+
+class MuteUserRequest(BaseModel):
+    mute_type: str
+    duration: str
+
+
+class ReportUserRequest(BaseModel):
+    reason: str
+    description: str = ""
+
+
+class ChatSettingsUpdateRequest(BaseModel):
+    custom_wallpaper: Optional[str] = None
+    custom_nickname: Optional[str] = None
+    is_muted: Optional[bool] = None
+    mute_duration: Optional[str] = None
+    notification_sound_enabled: Optional[bool] = None
+    vibration_enabled: Optional[bool] = None
+
+
+class ChatConversationStore:
+    def __init__(self) -> None:
+        self.listeners: Dict[str, List[asyncio.Queue]] = {}
+
+
+chat_store = ChatConversationStore()
+
+
+in_memory_posts: List[dict] = [
+    {
+        'id': 'seed-post-1',
+        'content': 'Building the cleanest ecosystem network live.',
+        'image_url': None,
+        'visibility': 'public',
+        'location': 'Secure Server Grid',
+        'tags': ['#Ecosystem', '#BITE', '#Privacy'],
+        'mentions': ['@shadow_dev'],
+        'likes': 1424,
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'user_id': 'local-user',
+        'approved': True,
+    },
+    {
+        'id': 'seed-post-2',
+        'content': 'Self-healing recommendation pipeline integrated successfully.',
+        'image_url': None,
+        'visibility': 'followers',
+        'location': 'Distributed Node 4',
+        'tags': ['#Algorithm', '#AI', '#NextGen'],
+        'mentions': ['@Aadil_724'],
+        'likes': 890,
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'user_id': 'user-ari',
+        'approved': False,
+    },
+    {
+        'id': 'seed-post-3',
+        'content': 'Notification relay tuning finished ahead of schedule.',
+        'image_url': None,
+        'visibility': 'public',
+        'location': 'Bridge Segment',
+        'tags': ['#Notifications', '#Realtime'],
+        'mentions': ['@nova_ai'],
+        'likes': 642,
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'user_id': 'user-nova',
+        'approved': True,
+    },
+]
+
+in_memory_stories: List[dict] = [
+    {
+        'id': 'story-1',
+        'user_id': 'local-user',
+        'username': 'operator_bite',
+        'media_name': 'secure-grid-launch.jpg',
+        'media_type': 'image',
+        'caption': 'Night release is stable. Monitoring all nodes.',
+        'mentions': ['@shadow_dev'],
+        'location_name': 'Secure Server Grid',
+        'music_track': 'Neon Circuit - Pulse Driver',
+        'overlay_text': 'Launch Window',
+        'overlay_emoji': '🚀',
+        'overlay_x': 0.55,
+        'overlay_y': 0.42,
+        'overlay_scale': 1.0,
+        'created_at': datetime.now(timezone.utc).isoformat(),
+        'expires_at': (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat(),
+        'viewers': [],
+    }
+]
+
+post_interaction_events: List[dict] = []
+
+admin_users_state: List[dict] = [
+    {'id': 1, 'username': 'operator_bite', 'status': 'active', 'last_seen': '2m ago'},
+    {'id': 2, 'username': 'nova_ai', 'status': 'active', 'last_seen': '8m ago'},
+    {'id': 3, 'username': 'shadow_dev', 'status': 'blocked', 'last_seen': '22m ago'},
+]
+
+admin_logs_state: List[dict] = [
+    {'id': 1, 'level': 'INFO', 'message': 'Secure feed sync completed', 'time': '2m ago'},
+    {'id': 2, 'level': 'WARN', 'message': 'Private visibility filter toggled', 'time': '9m ago'},
+    {'id': 3, 'level': 'INFO', 'message': 'Chat stream connected to shadow-node', 'time': '14m ago'},
+]
+
+otp_challenges: Dict[str, Dict[str, Any]] = {}
+auth_identity_registry: Dict[str, Any] = {
+    "phones": {},
+    "emails": set(),
+    "usernames": set(),
+}
+
+
+def add_admin_log(level: str, message: str) -> None:
+    entry = {
+        'id': int(datetime.now(timezone.utc).timestamp() * 1000),
+        'level': level,
+        'message': message,
+        'time': 'just now',
+    }
+    admin_logs_state.insert(0, entry)
+    admin_logs_state[:] = admin_logs_state[:8]
+
+
+def get_admin_metrics() -> dict:
+    return {
+        'active_users': sum(1 for user in admin_users_state if user.get('status') == 'active'),
+        'active_sessions': sum(1 for user in admin_users_state if user.get('status') in {'active', 'idle'}),
+        'posts_count': len(in_memory_posts),
+        'stories_count': len(in_memory_stories),
+        'logs_count': len(admin_logs_state),
+        'system_cpu_percent': 21,
+        'system_memory_percent': 48,
+        'database_status': 'connected_local' if not SUPABASE_URL else 'connected_supabase',
+    }
+
+
+def prune_expired_stories() -> None:
+    now = datetime.now(timezone.utc)
+    active_items: List[dict] = []
+    for story in in_memory_stories:
+        try:
+            expires_at = datetime.fromisoformat(story.get('expires_at', ''))
+        except Exception:
+            expires_at = now
+        if expires_at > now:
+            active_items.append(story)
+    in_memory_stories[:] = active_items
+
+
+def normalize_phone(country_code: str, phone_number: str) -> str:
+    cc = re.sub(r"[^\d+]", "", (country_code or "").strip())
+    digits = re.sub(r"\D", "", (phone_number or "").strip())
+    if not digits or len(digits) < 8:
+        raise HTTPException(status_code=400, detail="Enter a valid phone number")
+    if not cc.startswith("+"):
+        cc = f"+{re.sub(r'\D', '', cc)}"
+    return f"{cc}{digits}"
+
+
+def normalize_username(username: str) -> str:
+    return (username or "").strip().lower()
+
+
+def refresh_identity_registry() -> None:
+    auth_identity_registry["usernames"] = {normalize_username(user.get("username", "")) for user in social_graph.users.values() if user.get("username")}
+
+
+def prune_expired_otp_challenges() -> None:
+    now = datetime.now(timezone.utc)
+    expired_ids = [challenge_id for challenge_id, challenge in otp_challenges.items() if challenge["expires_at"] <= now]
+    for challenge_id in expired_ids:
+        otp_challenges.pop(challenge_id, None)
+
+
+def is_phone_identity(identity: str) -> bool:
+    cleaned = re.sub(r"[\s\-()]+", "", identity or "")
+    return bool(re.match(r"^\+?\d{8,16}$", cleaned))
+
+
+refresh_identity_registry()
+
+
+def resolve_current_user_id(x_user_id: Optional[str]) -> str:
+    candidate = (x_user_id or 'local-user').strip() or 'local-user'
+    return candidate if candidate in social_graph.users else 'local-user'
+
+
+def raise_social_error(error: SocialGraphError) -> None:
+    raise HTTPException(status_code=error.status_code, detail=error.detail)
+
+
+def get_conversation_partner_id(current_user_id: str, conversation_id: str) -> Optional[str]:
+    conversation = social_graph.conversations.get(conversation_id)
+    if conversation is None:
+        return None
+    participants = conversation.get('participant_user_ids', [])
+    return next((participant for participant in participants if participant != current_user_id), None)
+
+
+def can_view_author_posts(current_user_id: str, author_id: str) -> bool:
+    if author_id not in social_graph.users:
+        return True
+    if social_graph.is_blocked(current_user_id, author_id):
+        return False
+    return bool(social_graph._profile_access(current_user_id, author_id)["can_view_posts"])
+
+
+async def broadcast_message(conversation_id: str, message: dict) -> None:
+    queues = list(chat_store.listeners.get(conversation_id, []))
+    for queue in queues:
+        try:
+            await queue.put(message)
+        except Exception:
+            continue
+
+
+@app.get("/api/chat/conversations")
+async def list_chat_conversations(x_user_id: Optional[str] = Header(default=None)):
+    """Return all chat conversations with their recent message history."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    conversations = social_graph.list_conversations(current_user_id)
+    return {"success": True, "conversations": conversations}
+
+
+@app.get("/api/chat/conversations/{conversation_id}/messages")
+async def get_conversation_messages(conversation_id: str, x_user_id: Optional[str] = Header(default=None)):
+    """Return message history for a given conversation."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        messages = social_graph.get_conversation_messages(current_user_id, conversation_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "conversation_id": conversation_id, "messages": messages}
+
+
+@app.post("/api/chat/conversations/{conversation_id}/messages")
+async def send_chat_message(conversation_id: str, req: SendMessageRequest, x_user_id: Optional[str] = Header(default=None)):
+    """Persist and broadcast a message to the active conversation."""
+    if not ((req.text and req.text.strip()) or (req.encrypted_payload and req.encryption_nonce)):
+        raise HTTPException(status_code=400, detail="Message text or encrypted payload is required")
+
+    current_user_id = resolve_current_user_id(x_user_id)
+    sender_name = req.sender_name or social_graph.users[current_user_id]["display_name"]
+    try:
+        message = social_graph.send_message(
+            current_user_id,
+            conversation_id,
+            sender_name,
+            req.text,
+            req.encrypted_payload,
+            req.encryption_nonce,
+            req.sender_ephemeral_public_key,
+            req.recipient_key_id,
+            req.encryption_algorithm,
+        )
+    except SocialGraphError as error:
+        raise_social_error(error)
+
+    await broadcast_message(conversation_id, message)
+
+    partner_id = get_conversation_partner_id(current_user_id, conversation_id)
+    if partner_id:
+        try:
+            preview_text = req.text.strip() if req.text and req.text.strip() else "New encrypted message"
+            await push_notification_service.send_direct_message(partner_id, conversation_id, sender_name, preview_text)
+        except PushNotificationError:
+            pass
+
+    if req.sender_id != 'bot' and not req.encrypted_payload:
+        await asyncio.sleep(0.35)
+        reply = social_graph.append_bot_reply(
+            conversation_id,
+            'system-bot',
+            'Nova',
+            'Received and synced. The backend just pushed the update to the live stream.',
+        )
+        await broadcast_message(conversation_id, reply)
+
+    return {"success": True, "message": message}
+
+
+@app.get("/api/chat/conversations/{conversation_id}/details")
+async def get_chat_details(conversation_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        details = social_graph.get_chat_details(current_user_id, conversation_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, **details}
+
+
+@app.patch("/api/chat/conversations/{conversation_id}/settings")
+async def update_chat_settings(conversation_id: str, req: ChatSettingsUpdateRequest, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        settings = social_graph.update_chat_settings(
+            current_user_id,
+            conversation_id,
+            req.custom_wallpaper,
+            req.custom_nickname,
+            req.is_muted,
+            req.mute_duration,
+            req.notification_sound_enabled,
+            req.vibration_enabled,
+        )
+    except (SocialGraphError, ValueError) as error:
+        if isinstance(error, SocialGraphError):
+            raise_social_error(error)
+        raise HTTPException(status_code=400, detail=str(error))
+    return {"success": True, "settings": settings}
+
+
+@app.post("/api/chat/conversations/{conversation_id}/reset-wallpaper")
+async def reset_chat_wallpaper(conversation_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        settings = social_graph.reset_wallpaper(current_user_id, conversation_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "settings": settings}
+
+
+@app.post("/api/chat/conversations/{conversation_id}/clear")
+async def clear_chat_history(conversation_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        result = social_graph.clear_chat_history(current_user_id, conversation_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, **result}
+
+
+@app.get("/api/chat/conversations/{conversation_id}/search")
+async def search_in_chat(conversation_id: str, q: str = '', x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        results = social_graph.search_chat(current_user_id, conversation_id, q)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "matches": results}
+
+
+@app.get("/api/chat/conversations/{conversation_id}/export")
+async def export_chat(conversation_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        exported = social_graph.export_chat(current_user_id, conversation_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, **exported}
+
+
+@app.get("/api/social/me/overview")
+async def get_social_overview(x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    return {"success": True, **social_graph.get_me_overview(current_user_id)}
+
+
+@app.get("/api/users/search")
+async def search_users(q: str = '', x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    return {"success": True, "results": social_graph.search_users(current_user_id, q)}
+
+
+@app.get("/api/users/{user_id}/profile")
+async def get_user_profile(user_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        profile = social_graph.get_profile(current_user_id, user_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "profile": profile}
+
+
+@app.get("/api/users/{user_id}/followers")
+async def get_user_followers(user_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        followers = social_graph.get_followers(current_user_id, user_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "followers": followers}
+
+
+@app.get("/api/users/{user_id}/following")
+async def get_user_following(user_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        following = social_graph.get_following(current_user_id, user_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "following": following}
+
+
+@app.get("/api/users/{user_id}/posts")
+async def get_user_posts(user_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        posts = social_graph.get_posts(current_user_id, user_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "posts": posts}
+
+
+@app.post("/api/users/{user_id}/follow")
+async def follow_user(user_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        result = social_graph.create_follow(current_user_id, user_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    if result.get("status") == "pending":
+        actor_name = social_graph.users[current_user_id]["display_name"]
+        try:
+            await push_notification_service.send_social_event(user_id, actor_name, "follow_request", user_id)
+        except PushNotificationError:
+            pass
+    return {"success": True, **result}
+
+
+@app.delete("/api/users/{user_id}/follow")
+async def unfollow_user(user_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        result = social_graph.unfollow(current_user_id, user_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, **result}
+
+
+@app.delete("/api/follow-requests/{request_id}")
+async def cancel_follow_request(request_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        request = social_graph.cancel_follow_request(current_user_id, request_id)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "request": request}
+
+
+@app.post("/api/follow-requests/{request_id}/accept")
+async def accept_follow_request(request_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        request = social_graph.respond_to_follow_request(current_user_id, request_id, 'accept')
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "request": request}
+
+
+@app.post("/api/follow-requests/{request_id}/reject")
+async def reject_follow_request(request_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        request = social_graph.respond_to_follow_request(current_user_id, request_id, 'reject')
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "request": request}
+
+
+@app.patch("/api/users/me/privacy")
+async def update_my_privacy(req: PrivacyUpdateRequest, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    user = social_graph.update_privacy(current_user_id, req.is_private, req.is_blocked_from_search)
+    return {"success": True, "user": user}
+
+
+@app.post("/api/users/{user_id}/block")
+async def block_user(user_id: str, req: BlockUserRequest, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        block = social_graph.block_user(current_user_id, user_id, req.reason)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "block": block}
+
+
+@app.delete("/api/users/{user_id}/block")
+async def unblock_user(user_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    social_graph.unblock_user(current_user_id, user_id)
+    return {"success": True, "message": "User unblocked"}
+
+
+@app.post("/api/users/{user_id}/mute")
+async def mute_user(user_id: str, req: MuteUserRequest, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        mute = social_graph.mute_user(current_user_id, user_id, req.mute_type, req.duration)
+    except (SocialGraphError, ValueError) as error:
+        if isinstance(error, SocialGraphError):
+            raise_social_error(error)
+        raise HTTPException(status_code=400, detail=str(error))
+    return {"success": True, "mute": mute}
+
+
+@app.delete("/api/users/{user_id}/mute")
+async def unmute_user(user_id: str, mute_type: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    social_graph.unmute_user(current_user_id, user_id, mute_type)
+    return {"success": True, "message": "User unmuted"}
+
+
+@app.post("/api/reports/users/{user_id}")
+async def report_user(user_id: str, req: ReportUserRequest, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    try:
+        report = social_graph.report_user(current_user_id, user_id, req.reason, req.description)
+    except SocialGraphError as error:
+        raise_social_error(error)
+    return {"success": True, "report": report}
+
+
+@app.get("/api/chat/conversations/{conversation_id}/stream")
+async def stream_chat_messages(conversation_id: str, request: Request):
+    """Expose a simple SSE stream for real-time chat updates."""
+    queue: asyncio.Queue = asyncio.Queue()
+    chat_store.listeners.setdefault(conversation_id, []).append(queue)
+
+    async def event_stream():
+        try:
+            while True:
+                if await request.is_disconnected():
+                    break
+                try:
+                    payload = await asyncio.wait_for(queue.get(), timeout=30)
+                except asyncio.TimeoutError:
+                    continue
+                yield f"event: message\ndata: {json.dumps(payload)}\n\n"
+        finally:
+            listeners = chat_store.listeners.get(conversation_id, [])
+            chat_store.listeners[conversation_id] = [item for item in listeners if item is not queue]
+            if not chat_store.listeners.get(conversation_id):
+                chat_store.listeners.pop(conversation_id, None)
+
+    return StreamingResponse(event_stream(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "Connection": "keep-alive"})
 
 
 class ModerationRequest(BaseModel):
@@ -332,7 +981,20 @@ async def privacy():
 @limiter.limit("5/minute")
 async def api_login(request: Request, req: LoginRequest):
     """Authenticate user via Supabase Auth."""
-    email = req.identity if "@" in req.identity else f"{req.identity}@shadow.omnix"
+    identity = (req.identity or "").strip()
+    if not identity:
+        raise HTTPException(status_code=400, detail="Identity is required")
+
+    if "@" in identity:
+        email = identity.lower()
+    elif is_phone_identity(identity):
+        normalized_phone = normalize_phone("+", identity)
+        mapped_email = auth_identity_registry["phones"].get(normalized_phone)
+        if not mapped_email:
+            raise HTTPException(status_code=404, detail="Phone number is not registered")
+        email = mapped_email
+    else:
+        email = f"{identity.lower()}@shadow.omnix"
 
     result = await supabase_auth_request("token", {
         "grant_type": "password",
@@ -356,16 +1018,59 @@ async def api_login(request: Request, req: LoginRequest):
 @app.post("/api/auth/signup")
 @limiter.limit("3/minute")
 async def api_signup(request: Request, req: SignupRequest):
-    """Register new user via Supabase Auth and prepare a notification webhook."""
+    """Register new user via Supabase Auth."""
+    refresh_identity_registry()
+
+    normalized_username = normalize_username(req.username)
+    if normalized_username in auth_identity_registry["usernames"]:
+        raise HTTPException(status_code=409, detail="Username is already taken")
+
+    normalized_email = req.email.strip().lower()
+    if normalized_email in auth_identity_registry["emails"]:
+        raise HTTPException(status_code=409, detail="Email is already registered")
+
+    if not req.legal_accepted:
+        raise HTTPException(status_code=400, detail="You must accept Terms and Privacy Policy")
+
+    normalized_phone = ""
+    if req.phone_number:
+        normalized_phone = normalize_phone(req.phone_country_code or "+1", req.phone_number)
+        existing_phone_email = auth_identity_registry["phones"].get(normalized_phone)
+        if existing_phone_email:
+            raise HTTPException(status_code=409, detail="Phone number already exists")
+        prune_expired_otp_challenges()
+        challenge = otp_challenges.get(req.otp_challenge_id or "")
+        if not challenge or challenge["phone"] != normalized_phone or not challenge.get("verified"):
+            raise HTTPException(status_code=400, detail="Phone verification is required before signup")
     result = await supabase_auth_request("signup", {
-        "email": req.email,
+        "email": normalized_email,
         "password": req.password,
         "data": {
-            "username": req.username,
+            "username": normalized_username,
             "full_name": f"{req.first_name} {req.last_name}".strip(),
-            "mobile": req.mobile or "",
+            "display_nickname": (req.display_nickname or "").strip(),
+            "mobile": normalized_phone or req.mobile or "",
+            "phone_country_code": req.phone_country_code or "+1",
+            "terms_accepted": bool(req.legal_accepted),
+            "privacy_accepted": bool(req.legal_accepted),
         },
     })
+
+    auth_identity_registry["usernames"].add(normalized_username)
+    auth_identity_registry["emails"].add(normalized_email)
+    if normalized_phone:
+        auth_identity_registry["phones"][normalized_phone] = normalized_email
+
+    token_result: Dict[str, Any] = {}
+    token_payload = {
+        "grant_type": "password",
+        "email": normalized_email,
+        "password": req.password,
+    }
+    try:
+        token_result = await supabase_auth_request("token", token_payload)
+    except HTTPException:
+        token_result = {}
 
     webhook_payload = trigger_signup_notification_webhook({
         "username": req.username,
@@ -376,8 +1081,85 @@ async def api_signup(request: Request, req: SignupRequest):
     return {
         "success": True,
         "user_id": result.get("id", ""),
-        "message": "Account created successfully. Please check your email for verification.",
+        "message": "Account created successfully.",
+        "access_token": token_result.get("access_token", ""),
+        "refresh_token": token_result.get("refresh_token", ""),
+        "expires_in": token_result.get("expires_in", 3600),
+        "user": {
+            "id": token_result.get("user", {}).get("id", result.get("id", "")),
+            "email": normalized_email,
+            "username": normalized_username,
+            "phone": normalized_phone,
+        },
         "notification_webhook": webhook_payload,
+    }
+
+
+@app.post("/api/auth/otp/send")
+@limiter.limit("6/minute")
+async def api_send_signup_otp(request: Request, req: OtpSendRequest):
+    prune_expired_otp_challenges()
+    phone = normalize_phone(req.country_code, req.phone_number)
+
+    if phone in auth_identity_registry["phones"]:
+        raise HTTPException(status_code=409, detail="Phone number already exists")
+
+    otp_code = f"{secrets.randbelow(10**6):06d}"
+    challenge_id = f"otp_{uuid.uuid4().hex}"
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=5)
+    otp_challenges[challenge_id] = {
+        "phone": phone,
+        "otp_code": otp_code,
+        "verified": False,
+        "expires_at": expires_at,
+    }
+
+    payload = {
+        "success": True,
+        "challenge_id": challenge_id,
+        "expires_at": expires_at.isoformat(),
+        "message": "OTP sent successfully",
+    }
+    if os.getenv("EXPOSE_DEV_OTP", "true").lower() == "true":
+        payload["otp_code"] = otp_code
+    return payload
+
+
+@app.post("/api/auth/otp/verify")
+@limiter.limit("10/minute")
+async def api_verify_signup_otp(request: Request, req: OtpVerifyRequest):
+    prune_expired_otp_challenges()
+    challenge = otp_challenges.get(req.challenge_id)
+    if not challenge:
+        raise HTTPException(status_code=404, detail="OTP challenge expired or not found")
+
+    if not re.match(r"^\d{6}$", req.otp_code or ""):
+        raise HTTPException(status_code=400, detail="Enter a valid 6-digit OTP")
+
+    if challenge["otp_code"] != req.otp_code:
+        raise HTTPException(status_code=400, detail="Incorrect OTP code")
+
+    challenge["verified"] = True
+    return {
+        "success": True,
+        "challenge_id": req.challenge_id,
+        "phone": challenge["phone"],
+        "message": "Phone verification successful",
+    }
+
+
+@app.post("/api/auth/availability")
+@limiter.limit("10/minute")
+async def api_check_auth_availability(request: Request, req: AvailabilityRequest):
+    refresh_identity_registry()
+    normalized_username = normalize_username(req.username)
+    normalized_email = req.email.strip().lower()
+    username_available = normalized_username not in auth_identity_registry["usernames"]
+    email_available = normalized_email not in auth_identity_registry["emails"]
+    return {
+        "success": True,
+        "username_available": username_available,
+        "email_available": email_available,
     }
 
 
@@ -390,7 +1172,7 @@ async def api_forgot_password(request: Request, req: ForgotPasswordRequest):
 
 
 @app.get("/api/auth/me")
-async def api_me(authorization: Optional[str] = None):
+async def api_me(authorization: Optional[str] = Header(default=None)):
     """Get current authenticated user info."""
     if not authorization or not authorization.startswith("Bearer "):
         raise HTTPException(status_code=401, detail="Not authenticated")
@@ -442,14 +1224,291 @@ async def google_oauth_redirect():
     return {"redirect_url": redirect_url}
 
 
+# Admin / Dashboard API Routes
+@app.get("/api/admin/metrics")
+async def admin_metrics():
+    """Return aggregate admin metrics for the dashboard."""
+    prune_expired_stories()
+    return {"success": True, "metrics": get_admin_metrics()}
+
+
+@app.get("/api/admin/users")
+async def admin_users():
+    """Return a lightweight list of users for the admin dashboard."""
+    return {"success": True, "users": admin_users_state}
+
+
+@app.post("/api/admin/users/{user_id}/block")
+async def block_admin_user(user_id: int):
+    """Block a user from the admin dashboard."""
+    user = next((item for item in admin_users_state if item["id"] == user_id), None)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user["status"] != "blocked":
+        user["status"] = "blocked"
+        user["last_seen"] = "blocked now"
+        add_admin_log("WARN", f"User {user['username']} blocked")
+
+    return {"success": True, "message": "User blocked", "user": user}
+
+
+@app.post("/api/admin/users/{user_id}/unblock")
+async def unblock_admin_user(user_id: int):
+    """Unblock a user from the admin dashboard."""
+    user = next((item for item in admin_users_state if item["id"] == user_id), None)
+    if user is None:
+        raise HTTPException(status_code=404, detail="User not found")
+
+    if user["status"] != "active":
+        user["status"] = "active"
+        user["last_seen"] = "restored now"
+        add_admin_log("INFO", f"User {user['username']} unblocked")
+
+    return {"success": True, "message": "User unblocked", "user": user}
+
+
+@app.get("/api/admin/posts")
+async def admin_posts():
+    """Return posts for moderation in the admin dashboard."""
+    return {"success": True, "posts": in_memory_posts}
+
+
+@app.post("/api/admin/posts/{post_id}/approve")
+async def approve_admin_post(post_id: str):
+    """Approve a post in the moderation queue."""
+    post = next((item for item in in_memory_posts if item["id"] == post_id), None)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    post["approved"] = True
+    add_admin_log("INFO", f"Post {post_id} approved")
+    return {"success": True, "message": "Post approved", "post": post}
+
+
+@app.delete("/api/admin/posts/{post_id}")
+async def delete_admin_post(post_id: str):
+    """Delete a post from the moderation queue."""
+    post = next((item for item in in_memory_posts if item["id"] == post_id), None)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    in_memory_posts[:] = [item for item in in_memory_posts if item["id"] != post_id]
+    add_admin_log("WARN", f"Post {post_id} removed from moderation queue")
+    return {"success": True, "message": "Post deleted"}
+
+
+@app.get("/api/admin/logs")
+async def admin_logs():
+    """Return recent system logs for the admin dashboard."""
+    return {"success": True, "logs": admin_logs_state}
+
+
+@app.get("/api/stories/feed")
+async def get_story_feed(x_user_id: Optional[str] = Header(default=None)):
+    """Return active stories visible to the current user."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    prune_expired_stories()
+    visible: List[dict] = []
+    for story in in_memory_stories:
+        if can_view_author_posts(current_user_id, story.get('user_id', '')):
+            visible.append(story)
+    return {"success": True, "stories": visible}
+
+
+@app.get("/api/stories/music/search")
+async def search_story_music(q: str = ''):
+    query = (q or '').strip().lower()
+    library = [
+        'Neon Circuit - Pulse Driver',
+        'Shadowline - Midnight Run',
+        'Nova Sync - Skyline Bloom',
+        'Byte Signal - Orbital Echo',
+    ]
+    tracks = [item for item in library if query in item.lower()] if query else library
+    return {"success": True, "tracks": tracks[:10]}
+
+
+@app.get("/api/stories/location/search")
+async def search_story_location(q: str = ''):
+    query = (q or '').strip().lower()
+    locations = [
+        'Secure Server Grid',
+        'Distributed Node 4',
+        'Bridge Segment',
+        'Ops Control Bay',
+        'Blue Harbor Downtown',
+    ]
+    results = [item for item in locations if query in item.lower()] if query else locations
+    return {"success": True, "locations": results[:10]}
+
+
+@app.get("/api/stories/mentions")
+async def search_story_mentions(q: str = ''):
+    query = normalize_username(q)
+    users = [
+        {'id': user_id, 'username': user.get('username', ''), 'display_name': user.get('display_name', '')}
+        for user_id, user in social_graph.users.items()
+    ]
+    if query:
+        users = [item for item in users if query in normalize_username(item.get('username', ''))]
+    return {"success": True, "results": users[:12]}
+
+
+@app.post("/api/stories")
+async def create_story(req: StoryCreateRequest, x_user_id: Optional[str] = Header(default=None)):
+    """Create a story that auto-expires in 24 hours."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    owner = social_graph.users.get(current_user_id, {'username': 'local_user'})
+    now = datetime.now(timezone.utc)
+    story = {
+        'id': f"story-{uuid.uuid4().hex[:10]}",
+        'user_id': current_user_id,
+        'username': owner.get('username', 'local_user'),
+        'media_name': req.media_name,
+        'media_type': req.media_type,
+        'caption': req.caption or '',
+        'mentions': req.mentions or [],
+        'location_name': req.location_name or '',
+        'music_track': req.music_track or '',
+        'overlay_text': req.overlay_text or '',
+        'overlay_emoji': req.overlay_emoji or '',
+        'overlay_x': req.overlay_x if req.overlay_x is not None else 0.5,
+        'overlay_y': req.overlay_y if req.overlay_y is not None else 0.5,
+        'overlay_scale': req.overlay_scale if req.overlay_scale is not None else 1.0,
+        'created_at': now.isoformat(),
+        'expires_at': (now + timedelta(hours=24)).isoformat(),
+        'viewers': [],
+    }
+    in_memory_stories.insert(0, story)
+    add_admin_log("INFO", f"Story {story['id']} published by @{story['username']}")
+    return {"success": True, "story": story}
+
+
+@app.post("/api/stories/{story_id}/view")
+async def add_story_viewer(story_id: str, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    story = next((item for item in in_memory_stories if item.get('id') == story_id), None)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+
+    if current_user_id not in story['viewers']:
+        story['viewers'].append(current_user_id)
+        add_admin_log("INFO", f"Story {story_id} viewed by {current_user_id}")
+    return {"success": True, "viewers_count": len(story['viewers'])}
+
+
+@app.get("/api/stories/{story_id}/viewers")
+async def get_story_viewers(story_id: str):
+    story = next((item for item in in_memory_stories if item.get('id') == story_id), None)
+    if story is None:
+        raise HTTPException(status_code=404, detail="Story not found")
+    return {"success": True, "viewers": story.get('viewers', [])}
+
+
+@app.post("/api/posts/{post_id}/interactions")
+async def post_interaction(post_id: str, req: PostInteractionRequest, x_user_id: Optional[str] = Header(default=None)):
+    """Track post interaction events for recommendation pipelines."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    post = next((item for item in in_memory_posts if item.get('id') == post_id), None)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+
+    interaction_type = (req.interaction_type or '').strip().lower()
+    if interaction_type not in {'like', 'dislike', 'comment', 'share', 'impression', 'hashtag_click', 'watch_time'}:
+        raise HTTPException(status_code=400, detail="Unsupported interaction type")
+
+    event = {
+        'id': f"evt-{uuid.uuid4().hex[:10]}",
+        'post_id': post_id,
+        'user_id': current_user_id,
+        'interaction_type': interaction_type,
+        'metadata': req.metadata or {},
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    }
+    post_interaction_events.append(event)
+
+    if interaction_type == 'like':
+        post['likes'] = int(post.get('likes', 0)) + 1
+    if interaction_type == 'dislike':
+        post['likes'] = max(0, int(post.get('likes', 0)) - 1)
+    if interaction_type == 'share':
+        post['shares_count'] = int(post.get('shares_count', 0)) + 1
+    if interaction_type == 'impression':
+        post['impression_count'] = int(post.get('impression_count', 0)) + 1
+    if interaction_type == 'comment':
+        post['comments_count'] = int(post.get('comments_count', 0)) + 1
+
+    add_admin_log("INFO", f"Post event {interaction_type} on {post_id}")
+    return {"success": True, "event": event, "post": post}
+
+
+@app.post("/api/posts/{post_id}/comments")
+async def add_post_comment(post_id: str, req: PostCommentRequest, x_user_id: Optional[str] = Header(default=None)):
+    current_user_id = resolve_current_user_id(x_user_id)
+    post = next((item for item in in_memory_posts if item.get('id') == post_id), None)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    if not req.comment.strip():
+        raise HTTPException(status_code=400, detail="Comment cannot be empty")
+
+    comments = post.setdefault('comments', [])
+    comment = {
+        'id': f"cmt-{uuid.uuid4().hex[:10]}",
+        'post_id': post_id,
+        'user_id': current_user_id,
+        'comment': req.comment.strip(),
+        'created_at': datetime.now(timezone.utc).isoformat(),
+    }
+    comments.append(comment)
+    post['comments_count'] = len(comments)
+    add_admin_log("INFO", f"Comment added on {post_id}")
+    return {"success": True, "comment": comment, "comments_count": len(comments)}
+
+
+@app.get("/api/posts/{post_id}/comments")
+async def list_post_comments(post_id: str):
+    post = next((item for item in in_memory_posts if item.get('id') == post_id), None)
+    if post is None:
+        raise HTTPException(status_code=404, detail="Post not found")
+    return {"success": True, "comments": post.get('comments', [])}
+
+
+@app.get("/api/recommendation/events")
+async def recommendation_events(limit: int = 80):
+    return {"success": True, "events": post_interaction_events[-limit:]}
+
+
 # Posts API Routes
 @app.post("/api/posts")
-async def create_post(req: PostRequest, authorization: Optional[str] = None):
+async def create_post(req: PostRequest, authorization: Optional[str] = None, x_user_id: Optional[str] = Header(default=None)):
     """Create a new post."""
     moderation = auto_flag_content(req.content)
+    if not SUPABASE_URL:
+        current_user_id = resolve_current_user_id(x_user_id)
+        created = {
+            'id': f'local-post-{len(in_memory_posts) + 1}',
+            'content': req.content,
+            'image_url': req.image_url,
+            'visibility': req.visibility,
+            'location': req.location,
+            'tags': req.tags or ['#OMNIX'],
+            'mentions': [],
+            'likes': 0,
+            'created_at': datetime.now(timezone.utc).isoformat(),
+            'user_id': current_user_id,
+        }
+        created['approved'] = True
+        in_memory_posts.insert(0, created)
+        add_admin_log("INFO", f"Post {created['id']} created")
+        return {"success": True, "message": "Post created successfully", "data": created, "moderation": moderation}
+
     data = {
         "content": req.content,
         "image_url": req.image_url,
+        "visibility": req.visibility,
+        "location": req.location,
+        "tags": req.tags or [],
     }
     result = await supabase_db_request("POST", "posts", data)
     return {
@@ -461,14 +1520,26 @@ async def create_post(req: PostRequest, authorization: Optional[str] = None):
 
 
 @app.get("/api/posts/feed")
-async def get_feed(limit: int = 20, offset: int = 0):
+async def get_feed(limit: int = 20, offset: int = 0, x_user_id: Optional[str] = Header(default=None)):
     """Get posts feed ranked by engagement and recency."""
     requested_limit = max(1, min(int(limit), 100))
     requested_offset = max(0, int(offset))
-    fetch_limit = min(requested_offset + requested_limit * 4 + 20, 200)
+    current_user_id = resolve_current_user_id(x_user_id)
 
-    query = f"?select=id,content,likes,comments,shares,created_at&order=created_at.desc&limit={fetch_limit}&offset={requested_offset}"
-    result = await supabase_db_request("GET", "posts", query=query)
+    if not SUPABASE_URL:
+        visible_posts = [post for post in in_memory_posts if can_view_author_posts(current_user_id, post.get('user_id', ''))]
+        ranked_posts = rank_posts_for_feed(visible_posts)
+        paged_posts = ranked_posts[requested_offset:requested_offset + requested_limit]
+        return {"success": True, "posts": paged_posts}
+
+    fetch_limit = min(requested_offset + requested_limit * 4 + 20, 200)
+    query = f"?select=*&order=created_at.desc&limit={fetch_limit}&offset=0"
+    try:
+        result = await supabase_db_request("GET", "posts", query=query)
+    except HTTPException:
+        visible_posts = [post for post in in_memory_posts if can_view_author_posts(current_user_id, post.get('user_id', ''))]
+        result = visible_posts
+
     ranked_posts = rank_posts_for_feed(result)
     paged_posts = ranked_posts[requested_offset:requested_offset + requested_limit]
 
@@ -489,8 +1560,17 @@ async def flag_content_for_review(request: Request, req: ModerationRequest):
 
 
 @app.get("/api/posts/{post_id}")
-async def get_post(post_id: str):
+async def get_post(post_id: str, x_user_id: Optional[str] = Header(default=None)):
     """Get single post by ID."""
+    current_user_id = resolve_current_user_id(x_user_id)
+    if not SUPABASE_URL:
+        post = next((item for item in in_memory_posts if item['id'] == post_id), None)
+        if post is None:
+            raise HTTPException(status_code=404, detail="Post not found")
+        if not can_view_author_posts(current_user_id, post.get('user_id', '')):
+            raise HTTPException(status_code=403, detail="Posts are private")
+        return {"success": True, "post": post}
+
     query = f"?select=*&id=eq.{post_id}"
     result = await supabase_db_request("GET", "posts", query=query)
     if not result:
