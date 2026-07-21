@@ -1,0 +1,4 @@
+storeFile=../../keystore/omnix-main-release.jks
+storePassword=CHANGE_ME
+keyAlias=omnix_main_release
+keyPassword=CHANGE_ME

@@ -17,7 +17,12 @@ export async function apiJson<T>(path: string, options: RequestOptions = {}): Pr
 
   const headers = new Headers(options.headers ?? {});
   headers.set('X-User-Id', CURRENT_USER_ID);
-  const accessToken = window.localStorage.getItem('access_token');
+  let accessToken: string | null = null;
+  try {
+    accessToken = window.localStorage.getItem('access_token');
+  } catch (error) {
+    console.error('Unable to read access token from local storage', error);
+  }
   if (accessToken && !headers.has('Authorization')) {
     headers.set('Authorization', `Bearer ${accessToken}`);
   }

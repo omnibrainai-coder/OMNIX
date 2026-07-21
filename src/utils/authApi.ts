@@ -1,3 +1,4 @@
+
 import { API_BASE } from './socialApi';
 
 export type LoginMethod = 'email' | 'phone';
@@ -39,13 +40,18 @@ export type ForgotPasswordResponse = {
 };
 
 async function authRequest<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  const response = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify(body),
-  });
+  let response: Response;
+  try {
+    response = await fetch(`${API_BASE}${path}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(body),
+    });
+  } catch {
+    throw new Error('Network unavailable. Please check your connection and try again.');
+  }
 
   const payload = await response.json().catch(() => null);
   if (!response.ok) {
@@ -99,7 +105,12 @@ export async function verifyPasswordResetOtp(challengeId: string, otpCode: strin
 }
 
 export function persistAuthSession(response: AuthSuccessResponse): void {
-  window.localStorage.setItem('access_token', response.access_token);
-  window.localStorage.setItem('refresh_token', response.refresh_token);
-  window.localStorage.setItem('user', JSON.stringify(response.user));
+  try {
+    window.localStorage.setItem('access_token', response.access_token);
+    window.localStorage.setItem('refresh_token', response.refresh_token);
+    window.localStorage.setItem('user', JSON.stringify(response.user));
+  } catch (error) {
+    console.error('Failed to persist auth session', error);
+    throw new Error('Unable to persist secure session on this device.');
+  }
 }

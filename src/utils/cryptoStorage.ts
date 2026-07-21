@@ -60,27 +60,41 @@ async function idbRemove(key: string): Promise<void> {
 }
 
 export async function setSecureItem(key: string, value: string): Promise<void> {
-	if (window.AndroidSecureBridge) {
-		window.AndroidSecureBridge.setSecret(key, value);
-		return;
+	try {
+		if (window.AndroidSecureBridge) {
+			window.AndroidSecureBridge.setSecret(key, value);
+			return;
+		}
+		await idbSet(key, value);
+	} catch (error) {
+		console.error('Secure storage write failed', error);
+		throw new Error('Secure storage write failed');
 	}
-	await idbSet(key, value);
 }
 
 export async function getSecureItem(key: string): Promise<string | null> {
-	if (window.AndroidSecureBridge) {
-		const value = window.AndroidSecureBridge.getSecret(key);
-		return value || null;
+	try {
+		if (window.AndroidSecureBridge) {
+			const value = window.AndroidSecureBridge.getSecret(key);
+			return value || null;
+		}
+		return idbGet(key);
+	} catch (error) {
+		console.error('Secure storage read failed', error);
+		return null;
 	}
-	return idbGet(key);
 }
 
 export async function removeSecureItem(key: string): Promise<void> {
-	if (window.AndroidSecureBridge) {
-		window.AndroidSecureBridge.removeSecret(key);
-		return;
+	try {
+		if (window.AndroidSecureBridge) {
+			window.AndroidSecureBridge.removeSecret(key);
+			return;
+		}
+		await idbRemove(key);
+	} catch (error) {
+		console.error('Secure storage delete failed', error);
 	}
-	await idbRemove(key);
 }
 
 export async function setSecureJson<T>(key: string, value: T): Promise<void> {
@@ -92,5 +106,10 @@ export async function getSecureJson<T>(key: string): Promise<T | null> {
 	if (!raw) {
 		return null;
 	}
-	return JSON.parse(raw) as T;
+	try {
+		return JSON.parse(raw) as T;
+	} catch (error) {
+		console.error('Secure storage JSON parse failed', error);
+		return null;
+	}
 }

@@ -51,7 +51,6 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     needs: lint-test-build
-    if: ${{ hashFiles('android/**') != '' }}
 
     steps:
       - name: Checkout
@@ -62,6 +61,13 @@ jobs:
         with:
           distribution: temurin
           java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Ensure local.properties points to Android SDK
+        working-directory: android
+        run: echo "sdk.dir=$ANDROID_SDK_ROOT" > local.properties
 
       - name: Build Debug APK
         working-directory: android

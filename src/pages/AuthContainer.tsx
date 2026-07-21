@@ -4,30 +4,29 @@ import { HomeFeed } from '../components/ui/HomeFeed';
 import { Reels } from '../components/ui/Reels';
 import { Profile } from '../components/ui/Profile';
 import { ChatScreen } from './ChatScreen';
-import { AdminDashboard } from '../components/ui/AdminDashboard';
 import { SettingsScreen } from '../components/settings/SettingsScreen';
 import { LaunchSplashScreen } from '../components/app/LaunchSplashScreen';
-import { apiJson, CURRENT_USER_ID } from '../utils/socialApi';
+import { apiJson, API_BASE, CURRENT_USER_ID } from '../utils/socialApi';
 import { consumeDevicePushToken, consumeNativeLaunchPayload, requestNativeNotificationPermission, subscribeToOpenScreen } from '../utils/nativeAppBridge';
 import { SecureLock } from '../components/SecureLock';
 import { hasConfiguredAppLock, verifyAppLock } from '../utils/lockVault';
 import { OtpInput } from '../components/ui/OtpInput';
 import { LegalDocumentModal, type LegalDocumentType } from '../components/legal/LegalDocuments';
-import { checkSignupAvailability, loginWithPassword, persistAuthSession, requestPasswordReset, sendSignupOtp, signupWithWizard, verifyPasswordResetOtp, verifySignupOtp } from '../utils/authApi';
+import { checkSignupAvailability, loginWithPassword, persistAuthSession, sendSignupOtp, signupWithWizard, verifySignupOtp } from '../utils/authApi';
 
 export function AuthContainer() {
   const [isBootstrapping, setIsBootstrapping] = useState(true);
   const [screen, setScreen] = useState<'login' | 'signup' | 'dashboard'>('login');
-  const [activeTab, setActiveTab] = useState<'home' | 'search' | 'post' | 'reels' | 'profile' | 'messages' | 'admin' | 'settings'>('home');
+  const [activeTab, setActiveTab] = useState<'home' | 'search' | 'post' | 'reels' | 'profile' | 'messages' | 'settings'>('home');
   const [targetConversationId, setTargetConversationId] = useState('');
   const [appLocked, setAppLocked] = useState(false);
   const [appLockBusy, setAppLockBusy] = useState(false);
   const [appLockError, setAppLockError] = useState('');
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
-  const [loginMode, setLoginMode] = useState<'email' | 'phone'>('email');
   const [authBusy, setAuthBusy] = useState(false);
   const [authError, setAuthError] = useState('');
+  const [offlineMode, setOfflineMode] = useState(false);
   const [legalModal, setLegalModal] = useState<LegalDocumentType | null>(null);
   const [currentUsername, setCurrentUsername] = useState('operator_bite');
 
@@ -42,81 +41,155 @@ export function AuthContainer() {
   const [displayNickname, setDisplayNickname] = useState('');
   const [availabilityChecked, setAvailabilityChecked] = useState(false);
   const [availabilityStatus, setAvailabilityStatus] = useState('');
+  const [availabilityBusy, setAvailabilityBusy] = useState(false);
   const [signupPassword, setSignupPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [legalAccepted, setLegalAccepted] = useState(false);
-  const [forgotOpen, setForgotOpen] = useState(false);
-  const [forgotMode, setForgotMode] = useState<'email' | 'phone'>('email');
-  const [forgotEmail, setForgotEmail] = useState('');
-  const [forgotCountryCode, setForgotCountryCode] = useState('+1');
-  const [forgotPhoneNumber, setForgotPhoneNumber] = useState('');
-  const [forgotOtpChallengeId, setForgotOtpChallengeId] = useState('');
-  const [forgotOtpCode, setForgotOtpCode] = useState('');
-  const [forgotBusy, setForgotBusy] = useState(false);
-  const [forgotError, setForgotError] = useState('');
-  const [forgotStatus, setForgotStatus] = useState('');
   
   // Self Healing Feed Training Model State Log Tracker
   const [algoLogs, setAlgoLogs] = useState<string[]>(['Algorithm Initialized: Passive State Listening...']);
 
   const targetUsername = currentUsername.trim() || 'operator_bite';
-  const isAdminSession = ['admin', 'operator_bite', 'omnix-admin'].includes(targetUsername.toLowerCase());
+
+  const clearCorruptLocalState = () => {
+    try {
+      window.localStorage.removeItem('user');
+      window.localStorage.removeItem('access_token');
+      window.localStorage.removeItem('refresh_token');
+    } catch (error) {
+      console.error('Failed to clear corrupt local storage', error);
+    }
+  };
+
+  const probeBackendReachable = async (): Promise<boolean> => {
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 3500);
+    try {
+      const response = await fetch(`${API_BASE}/api/auth/availability`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: '', username: '' }),
+        signal: controller.signal,
+      });
+      return response.status >= 200 && response.status < 500;
+    } catch {
+      return false;
+    } finally {
+      window.clearTimeout(timeout);
+    }
+  };
 
   useEffect(() => {
     const bootstrap = async () => {
-      const storedUser = window.localStorage.getItem('user');
-      const storedToken = window.localStorage.getItem('access_token');
-      const launchPayload = consumeNativeLaunchPayload();
+      try {
+        let storedUser: string | null = null;
+        let storedToken: string | null = null;
+        let launchPayload: ReturnType<typeof consumeNativeLaunchPayload> = null;
 
-      if (storedUser || storedToken) {
         try {
-          const parsedUser = storedUser ? JSON.parse(storedUser) as { username?: string } : null;
-          if (parsedUser?.username) {
-            setCurrentUsername(parsedUser.username);
-            setIdentifier(parsedUser.username);
+          storedUser = window.localStorage.getItem('user');
+          storedToken = window.localStorage.getItem('access_token');
+        } catch (error) {
+          console.error('Bootstrap local storage read failed', error);
+          clearCorruptLocalState();
+          setScreen('login');
+        }
+
+        try {
+          launchPayload = consumeNativeLaunchPayload();
+        } catch (error) {
+          console.error('Launch payload read failed', error);
+        }
+
+        const backendReachable = await probeBackendReachable();
+        setOfflineMode(!backendReachable);
+
+        if (!backendReachable) {
+          setScreen('login');
+          setAuthError('Offline Mode');
+        }
+
+        if (!storedToken) {
+          clearCorruptLocalState();
+          setScreen('login');
+        }
+
+        if (backendReachable && storedToken) {
+          try {
+            const parsedUser = storedUser ? JSON.parse(storedUser) as { username?: string } : null;
+            if (parsedUser?.username) {
+              setCurrentUsername(parsedUser.username);
+              setIdentifier(parsedUser.username);
+            }
+          } catch (error) {
+            console.error('Corrupt user payload in local storage', error);
+            clearCorruptLocalState();
+            setScreen('login');
+            setAuthError('Session data was invalid. Please login again.');
+            return;
           }
-        } catch {
-          // Ignore malformed local storage and continue with token-based boot.
+
+          setScreen('dashboard');
         }
-        setScreen('dashboard');
-      }
 
-      if (await hasConfiguredAppLock()) {
-        setAppLocked(true);
-      }
-
-      if (launchPayload?.targetScreen === 'chat') {
-        setScreen('dashboard');
-        setActiveTab('messages');
-        setTargetConversationId(launchPayload.conversationId ?? '');
-      } else if (launchPayload?.targetScreen === 'profile') {
-        setScreen('dashboard');
-        setActiveTab('profile');
-      } else if (launchPayload?.targetScreen === 'settings') {
-        setScreen('dashboard');
-        setActiveTab('settings');
-      }
-
-      const pendingPushToken = consumeDevicePushToken();
-      if (pendingPushToken) {
         try {
-          await apiJson('/api/v1/push/register-device', {
-            method: 'POST',
-            body: JSON.stringify({
-              fcm_token: pendingPushToken,
-              platform: 'android',
-              device_id: 'native-webview-shell',
-              app_version: '1.0.0',
-            }),
-            headers: { 'X-User-Id': CURRENT_USER_ID },
-          });
-        } catch {
-          // Device token registration is retried on next app launch.
+          if (await hasConfiguredAppLock()) {
+            setAppLocked(true);
+          }
+        } catch (error) {
+          console.error('App lock bootstrap read failed', error);
         }
-      }
 
-      requestNativeNotificationPermission();
-      window.setTimeout(() => setIsBootstrapping(false), 1350);
+        if (backendReachable && launchPayload?.targetScreen === 'chat') {
+          setScreen('dashboard');
+          setActiveTab('messages');
+          setTargetConversationId(launchPayload.conversationId ?? '');
+        } else if (backendReachable && launchPayload?.targetScreen === 'profile') {
+          setScreen('dashboard');
+          setActiveTab('profile');
+        } else if (backendReachable && launchPayload?.targetScreen === 'settings') {
+          setScreen('dashboard');
+          setActiveTab('settings');
+        }
+
+        let pendingPushToken: string | null = null;
+        try {
+          pendingPushToken = consumeDevicePushToken();
+        } catch (error) {
+          console.error('Push token read failed', error);
+        }
+
+        if (backendReachable && pendingPushToken) {
+          try {
+            await apiJson('/api/v1/push/register-device', {
+              method: 'POST',
+              body: JSON.stringify({
+                fcm_token: pendingPushToken,
+                platform: 'android',
+                device_id: 'native-webview-shell',
+                app_version: '1.0.0',
+              }),
+              headers: { 'X-User-Id': CURRENT_USER_ID },
+            });
+          } catch {
+            // Device token registration is retried on next app launch.
+          }
+        }
+
+        try {
+          requestNativeNotificationPermission();
+        } catch (error) {
+          console.error('Notification permission bridge failed', error);
+        }
+      } catch (error) {
+        console.error('Fatal bootstrap failure', error);
+        clearCorruptLocalState();
+        setScreen('login');
+        setOfflineMode(true);
+        setAuthError('Offline Mode');
+      } finally {
+        window.setTimeout(() => setIsBootstrapping(false), 1000);
+      }
     };
 
     void bootstrap();
@@ -135,6 +208,48 @@ export function AuthContainer() {
     });
     return () => unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (screen !== 'signup' || signupStep !== 2) {
+      return;
+    }
+
+    const trimmedUsername = username.trim();
+    const trimmedEmail = email.trim();
+    if (!trimmedUsername || !trimmedEmail) {
+      setAvailabilityChecked(false);
+      setAvailabilityBusy(false);
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setAvailabilityBusy(true);
+      void checkSignupAvailability(trimmedEmail, trimmedUsername)
+        .then((response) => {
+          if (!response.email_available) {
+            setAvailabilityChecked(false);
+            setAvailabilityStatus('Email is already registered.');
+            return;
+          }
+          if (!response.username_available) {
+            setAvailabilityChecked(false);
+            setAvailabilityStatus('Username is already taken. Choose another one.');
+            return;
+          }
+          setAvailabilityChecked(true);
+          setAvailabilityStatus('Username is available.');
+        })
+        .catch(() => {
+          setAvailabilityChecked(false);
+          setAvailabilityStatus('Unable to validate username right now. Check your network and retry.');
+        })
+        .finally(() => {
+          setAvailabilityBusy(false);
+        });
+    }, 450);
+
+    return () => window.clearTimeout(timeoutId);
+  }, [screen, signupStep, email, username]);
 
   const registerAlgorithmicTrain = (actionType: string, metaString: string) => {
     const updatedLog = `[TRAINED] ${actionType} on target node: ${metaString} -> Adjusting Weight Vectors.`;
@@ -175,18 +290,6 @@ export function AuthContainer() {
     if (userConfirm) {
       alert('✅ Storage pipeline connection authorized without leaking system location strings.');
     }
-  };
-
-  const resetForgotPasswordState = () => {
-    setForgotMode('email');
-    setForgotEmail('');
-    setForgotCountryCode('+1');
-    setForgotPhoneNumber('');
-    setForgotOtpChallengeId('');
-    setForgotOtpCode('');
-    setForgotBusy(false);
-    setForgotError('');
-    setForgotStatus('');
   };
 
   if (isBootstrapping) {
@@ -241,26 +344,6 @@ export function AuthContainer() {
             <span style={{ fontSize: '22px', fontWeight: 'bold', fontStyle: 'italic', letterSpacing: '-0.5px' }}>BITE</span>
             
             <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-              {activeTab === 'home' && isAdminSession ? (
-                <button
-                  type="button"
-                  onClick={() => setActiveTab('admin')}
-                  style={{
-                    borderRadius: '999px',
-                    border: '1px solid #38bdf8',
-                    background: 'rgba(56, 189, 248, 0.16)',
-                    color: '#7dd3fc',
-                    padding: '6px 10px',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    letterSpacing: '0.12em',
-                    textTransform: 'uppercase',
-                    cursor: 'pointer',
-                  }}
-                >
-                  Admin
-                </button>
-              ) : null}
               {activeTab === 'profile' ? (
                 // Settings Engine Vector Trigger (Exclusive for Profile Tab Viewport)
                 <svg onClick={() => setActiveTab('settings')} width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" style={{ cursor: 'pointer' }}><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -309,10 +392,6 @@ export function AuthContainer() {
           <ChatScreen onBack={() => setActiveTab('home')} initialConversationId={targetConversationId} />
         </div>
 
-        <div style={{ display: activeTab === 'admin' ? 'block' : 'none' }}>
-          <AdminDashboard onBack={() => setActiveTab('home')} />
-        </div>
-
         {/* --- CLEAN RE-ENGINEERED INSTAGRAM BAR PLATFORM BOTTOM NAVIGATION --- */}
         {showBottomBar && (
           <div style={{ 
@@ -337,11 +416,6 @@ export function AuthContainer() {
             <div onClick={() => setActiveTab('profile')} style={{ cursor: 'pointer', opacity: activeTab === 'profile' ? 1 : 0.4 }}>
               <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"></path><circle cx="12" cy="7" r="4"></circle></svg>
             </div>
-            {isAdminSession ? (
-              <div onClick={() => setActiveTab('admin')} style={{ cursor: 'pointer', opacity: activeTab === 'admin' ? 1 : 0.4 }}>
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 3l7 4v5c0 4.2-2.8 7.5-7 9-4.2-1.5-7-4.8-7-9V7l7-4z"></path><path d="M9 12l2 2 4-4"></path></svg>
-              </div>
-            ) : null}
           </div>
         )}
 
@@ -360,23 +434,9 @@ export function AuthContainer() {
   const handleLogin = async (event: React.FormEvent) => {
     event.preventDefault();
     setAuthError('');
-
-    if (loginMode === 'email' && !identifier.trim()) {
-      setAuthError('Enter your email or username.');
-      return;
-    }
-    if (loginMode === 'phone' && phoneNumber.replace(/\D/g, '').length < 8) {
-      setAuthError('Enter a valid phone number.');
-      return;
-    }
-    if (!password.trim()) {
-      setAuthError('Password is required.');
-      return;
-    }
-
     setAuthBusy(true);
     try {
-      const identity = loginMode === 'phone' ? `${countryCode}${phoneNumber}` : identifier.trim();
+      const identity = identifier.trim();
       const response = await loginWithPassword(identity, password);
       persistAuthSession(response);
       finalizeAuth(response.user.username || identifier.trim() || 'operator_bite');
@@ -389,10 +449,6 @@ export function AuthContainer() {
 
   const requestOtp = async () => {
     setAuthError('');
-    if (phoneNumber.replace(/\D/g, '').length < 8) {
-      setAuthError('Enter a valid phone number before requesting OTP.');
-      return;
-    }
     setAuthBusy(true);
     try {
       const response = await sendSignupOtp(countryCode, phoneNumber);
@@ -427,12 +483,8 @@ export function AuthContainer() {
   const validateStepTwo = async () => {
     setAuthError('');
     setAvailabilityStatus('');
-    if (!/^\S+@\S+\.\S+$/.test(email.trim())) {
-      setAuthError('Enter a valid email address.');
-      return;
-    }
-    if (username.trim().length < 3) {
-      setAuthError('Username must be at least 3 characters.');
+    if (availabilityChecked) {
+      setSignupStep(3);
       return;
     }
     setAuthBusy(true);
@@ -458,16 +510,7 @@ export function AuthContainer() {
 
   const createAccount = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!otpVerified) {
-      setAuthError('Verify your phone with OTP before creating an account.');
-      return;
-    }
-    if (!availabilityChecked) {
-      setAuthError('Validate email and username availability first.');
-      return;
-    }
     if (!legalAccepted) {
-      setAuthError('You must accept the Terms and Privacy Policy.');
       return;
     }
     if (signupPassword.length < 6) {
@@ -502,57 +545,6 @@ export function AuthContainer() {
     }
   };
 
-  const handleForgotPasswordRequest = async () => {
-    setForgotError('');
-    setForgotStatus('');
-
-    if (forgotMode === 'email' && !/^\S+@\S+\.\S+$/.test(forgotEmail.trim())) {
-      setForgotError('Enter a valid email address.');
-      return;
-    }
-    if (forgotMode === 'phone' && forgotPhoneNumber.replace(/\D/g, '').length < 8) {
-      setForgotError('Enter a valid phone number.');
-      return;
-    }
-
-    setForgotBusy(true);
-    try {
-      const response = await requestPasswordReset({
-        mode: forgotMode,
-        email: forgotMode === 'email' ? forgotEmail.trim() : undefined,
-        country_code: forgotMode === 'phone' ? forgotCountryCode : undefined,
-        phone_number: forgotMode === 'phone' ? forgotPhoneNumber : undefined,
-      });
-      setForgotStatus(response.message || 'Password reset request sent.');
-      if (response.challenge_id) {
-        setForgotOtpChallengeId(response.challenge_id);
-      }
-      if (response.otp_code) {
-        setForgotStatus((prev) => `${prev} Dev OTP: ${response.otp_code}`);
-      }
-    } catch (error) {
-      setForgotError(error instanceof Error ? error.message : 'Unable to process reset request');
-    } finally {
-      setForgotBusy(false);
-    }
-  };
-
-  const handleVerifyForgotOtp = async () => {
-    if (!forgotOtpChallengeId || forgotOtpCode.length !== 6) {
-      return;
-    }
-    setForgotBusy(true);
-    setForgotError('');
-    try {
-      await verifyPasswordResetOtp(forgotOtpChallengeId, forgotOtpCode);
-      setForgotStatus('OTP verified successfully. Continue with your password reset instructions.');
-    } catch (error) {
-      setForgotError(error instanceof Error ? error.message : 'OTP verification failed');
-    } finally {
-      setForgotBusy(false);
-    }
-  };
-
   return (
     <div style={{
       background: 'linear-gradient(130deg, #f0f9ff 0%, #ecfeff 34%, #fdf2f8 68%, #fef9c3 100%)',
@@ -566,60 +558,45 @@ export function AuthContainer() {
       boxSizing: 'border-box',
     }}>
       <div style={{ marginTop: '8px', textAlign: 'center' }}>
-        <h1 style={{ fontSize: '34px', fontWeight: 900, letterSpacing: '0.08em', margin: 0 }}>BYTECHAT</h1>
-        <p style={{ margin: '6px 0 0', color: '#475569', fontSize: '13px' }}>Secure identity onboarding for trusted messaging.</p>
+        <h1 style={{ fontSize: '34px', fontWeight: 900, letterSpacing: '0.08em', margin: 0 }}>CLOCKCHAT</h1>
+        <p style={{ margin: '6px 0 0', color: '#475569', fontSize: '13px' }}>ClockChat: Encrypted by Kript Engine</p>
       </div>
 
       <div style={{ width: '100%', maxWidth: '420px' }}>
         <div style={{ backgroundColor: 'rgba(255, 255, 255, 0.9)', backdropFilter: 'blur(14px)', border: '1px solid #e2e8f0', padding: '24px', borderRadius: '24px', boxSizing: 'border-box', boxShadow: '0 20px 50px rgba(30, 41, 59, 0.12)' }}>
-          <div style={{ display: 'flex', gap: '8px', marginBottom: '16px' }}>
-            <button type="button" onClick={() => { setScreen('login'); setAuthError(''); }} style={{ flex: 1, borderRadius: '999px', border: screen === 'login' ? '1px solid #0284c7' : '1px solid #cbd5e1', background: screen === 'login' ? '#e0f2fe' : '#ffffff', color: '#0f172a', padding: '10px', cursor: 'pointer', fontWeight: 700 }}>Login</button>
-            <button type="button" onClick={() => { setScreen('signup'); setAuthError(''); }} style={{ flex: 1, borderRadius: '999px', border: screen === 'signup' ? '1px solid #0284c7' : '1px solid #cbd5e1', background: screen === 'signup' ? '#e0f2fe' : '#ffffff', color: '#0f172a', padding: '10px', cursor: 'pointer', fontWeight: 700 }}>Sign Up</button>
-          </div>
-
+          {offlineMode ? (
+            <div style={{ marginBottom: '12px', border: '1px solid #f59e0b', background: '#fffbeb', color: '#92400e', borderRadius: '10px', padding: '10px 12px', fontSize: '13px', fontWeight: 700 }}>
+              Offline Mode
+            </div>
+          ) : null}
           {screen === 'login' ? (
             <form onSubmit={handleLogin}>
-              <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-                <button type="button" onClick={() => setLoginMode('email')} style={{ flex: 1, borderRadius: '999px', border: loginMode === 'email' ? '1px solid #0f766e' : '1px solid #cbd5e1', background: loginMode === 'email' ? '#ccfbf1' : '#ffffff', padding: '8px', cursor: 'pointer' }}>Email</button>
-                <button type="button" onClick={() => setLoginMode('phone')} style={{ flex: 1, borderRadius: '999px', border: loginMode === 'phone' ? '1px solid #0f766e' : '1px solid #cbd5e1', background: loginMode === 'phone' ? '#ccfbf1' : '#ffffff', padding: '8px', cursor: 'pointer' }}>Phone</button>
-              </div>
-
-              {loginMode === 'phone' ? (
-                <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '8px', marginBottom: '12px' }}>
-                  <input value={countryCode} onChange={(event) => setCountryCode(event.target.value)} placeholder="+1" style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1' }} />
-                  <input value={phoneNumber} onChange={(event) => setPhoneNumber(event.target.value)} placeholder="Phone number" style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1' }} />
-                </div>
-              ) : (
-                <input value={identifier} onChange={(event) => setIdentifier(event.target.value)} required placeholder="Email or username" style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '12px', boxSizing: 'border-box' }} />
-              )}
+              <h2 style={{ margin: '0 0 12px', fontSize: '22px', fontWeight: 800 }}>Login</h2>
+              <input value={identifier} onChange={(event) => setIdentifier(event.target.value)} required placeholder="Identifier (username, email, or phone)" style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '12px', boxSizing: 'border-box' }} />
 
               <input type="password" value={password} onChange={(event) => setPassword(event.target.value)} required placeholder="Password" style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '14px', boxSizing: 'border-box' }} />
-              <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '12px' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    resetForgotPasswordState();
-                    if (/^\S+@\S+\.\S+$/.test(identifier.trim())) {
-                      setForgotMode('email');
-                      setForgotEmail(identifier.trim());
-                    } else if (phoneNumber.trim()) {
-                      setForgotMode('phone');
-                      setForgotPhoneNumber(phoneNumber.trim());
-                      setForgotCountryCode(countryCode.trim() || '+1');
-                    }
-                    setForgotOpen(true);
-                  }}
-                  style={{ border: 'none', background: 'transparent', color: '#0369a1', cursor: 'pointer', fontSize: '12px', fontWeight: 700, textDecoration: 'underline', padding: 0 }}
-                >
-                  Forgot Password?
-                </button>
-              </div>
+              <button type="button" onClick={() => window.alert('Use the Forgot Password flow from the recovery screen.')} style={{ border: 'none', background: 'transparent', color: '#0369a1', cursor: 'pointer', textDecoration: 'underline', fontSize: '13px', padding: 0, marginBottom: '14px' }}>
+                Forgot Password?
+              </button>
               <button type="submit" disabled={authBusy} style={{ width: '100%', padding: '12px', borderRadius: '12px', border: 'none', background: '#0f172a', color: '#fff', fontWeight: 700, cursor: authBusy ? 'not-allowed' : 'pointer', opacity: authBusy ? 0.7 : 1 }}>
                 {authBusy ? 'Signing in…' : 'Login'}
               </button>
+
+              <div style={{ marginTop: '14px', textAlign: 'center', fontSize: '13px', color: '#475569' }}>
+                New here?
+                {' '}
+                <button type="button" onClick={() => { setScreen('signup'); setAuthError(''); }} style={{ border: 'none', background: 'transparent', color: '#0369a1', textDecoration: 'underline', cursor: 'pointer', padding: 0, fontWeight: 700 }}>
+                  Sign Up
+                </button>
+              </div>
             </form>
           ) : (
             <form onSubmit={createAccount}>
+              <div style={{ marginBottom: '10px' }}>
+                <button type="button" onClick={() => { setScreen('login'); setAuthError(''); }} style={{ borderRadius: '999px', border: '1px solid #cbd5e1', background: '#ffffff', color: '#334155', padding: '8px 12px', cursor: 'pointer', fontWeight: 700 }}>
+                  Back to Login
+                </button>
+              </div>
               <div style={{ fontSize: '12px', color: '#0369a1', textTransform: 'uppercase', letterSpacing: '0.14em', marginBottom: '8px' }}>Step {signupStep} of 3</div>
 
               {signupStep === 1 ? (
@@ -650,6 +627,10 @@ export function AuthContainer() {
                   <input type="email" value={email} onChange={(event) => { setEmail(event.target.value); setAvailabilityChecked(false); }} required placeholder="Email address" style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '10px', boxSizing: 'border-box' }} />
                   <input value={username} onChange={(event) => { setUsername(event.target.value); setAvailabilityChecked(false); }} required placeholder="Unique username" style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '10px', boxSizing: 'border-box' }} />
                   <input value={displayNickname} onChange={(event) => setDisplayNickname(event.target.value)} required placeholder="Display nickname" style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '10px', boxSizing: 'border-box' }} />
+
+                  <div style={{ fontSize: '12px', color: '#334155', marginBottom: '10px' }}>
+                    {availabilityBusy ? 'Checking username availability…' : availabilityStatus || 'Username availability is checked in real-time.'}
+                  </div>
 
                   <div style={{ display: 'flex', gap: '8px' }}>
                     <button type="button" onClick={() => setSignupStep(1)} style={{ flex: 1, padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#ffffff', cursor: 'pointer' }}>Back</button>
@@ -700,67 +681,10 @@ export function AuthContainer() {
         </div>
       </div>
 
-      <div style={{ fontSize: '14px', color: '#334155', letterSpacing: '0.18em', fontWeight: 800 }}>FROM BITE</div>
-
-      {forgotOpen ? (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(2, 6, 23, 0.68)', backdropFilter: 'blur(3px)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px', zIndex: 220 }}>
-          <div style={{ width: '100%', maxWidth: '420px', borderRadius: '18px', background: '#ffffff', color: '#0f172a', border: '1px solid #cbd5e1', boxShadow: '0 24px 44px rgba(15, 23, 42, 0.32)', padding: '18px' }}>
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
-              <div>
-                <div style={{ fontSize: '10px', letterSpacing: '0.14em', textTransform: 'uppercase', color: '#0284c7' }}>Recovery flow</div>
-                <div style={{ fontSize: '19px', fontWeight: 800 }}>Forgot Password</div>
-              </div>
-              <button type="button" onClick={() => setForgotOpen(false)} style={{ borderRadius: '999px', border: '1px solid #cbd5e1', background: '#f8fafc', cursor: 'pointer', padding: '6px 10px', fontWeight: 700 }}>Close</button>
-            </div>
-
-            <div style={{ display: 'flex', gap: '8px', marginBottom: '12px' }}>
-              <button type="button" onClick={() => { setForgotMode('email'); setForgotError(''); setForgotStatus(''); }} style={{ flex: 1, borderRadius: '999px', border: forgotMode === 'email' ? '1px solid #0284c7' : '1px solid #cbd5e1', background: forgotMode === 'email' ? '#e0f2fe' : '#fff', padding: '8px', cursor: 'pointer' }}>Email Link</button>
-              <button type="button" onClick={() => { setForgotMode('phone'); setForgotError(''); setForgotStatus(''); }} style={{ flex: 1, borderRadius: '999px', border: forgotMode === 'phone' ? '1px solid #0284c7' : '1px solid #cbd5e1', background: forgotMode === 'phone' ? '#e0f2fe' : '#fff', padding: '8px', cursor: 'pointer' }}>Phone OTP</button>
-            </div>
-
-            {forgotMode === 'email' ? (
-              <input
-                type="email"
-                value={forgotEmail}
-                onChange={(event) => setForgotEmail(event.target.value)}
-                placeholder="Enter your account email"
-                style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', marginBottom: '10px', boxSizing: 'border-box' }}
-              />
-            ) : (
-              <div style={{ display: 'grid', gridTemplateColumns: '100px 1fr', gap: '8px', marginBottom: '10px' }}>
-                <input
-                  value={forgotCountryCode}
-                  onChange={(event) => setForgotCountryCode(event.target.value)}
-                  placeholder="+1"
-                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                />
-                <input
-                  value={forgotPhoneNumber}
-                  onChange={(event) => setForgotPhoneNumber(event.target.value)}
-                  placeholder="Phone number"
-                  style={{ width: '100%', padding: '12px', borderRadius: '12px', border: '1px solid #cbd5e1', boxSizing: 'border-box' }}
-                />
-              </div>
-            )}
-
-            <button type="button" onClick={() => void handleForgotPasswordRequest()} disabled={forgotBusy} style={{ width: '100%', padding: '11px', borderRadius: '12px', border: 'none', background: '#0f172a', color: '#fff', fontWeight: 700, cursor: forgotBusy ? 'not-allowed' : 'pointer', opacity: forgotBusy ? 0.7 : 1, marginBottom: forgotOtpChallengeId ? '12px' : '0px' }}>
-              {forgotBusy ? 'Sending…' : forgotMode === 'email' ? 'Send Password Reset Link' : 'Send OTP'}
-            </button>
-
-            {forgotMode === 'phone' && forgotOtpChallengeId ? (
-              <div style={{ marginTop: '12px' }}>
-                <OtpInput onComplete={(value) => setForgotOtpCode(value)} />
-                <button type="button" onClick={() => void handleVerifyForgotOtp()} disabled={forgotBusy || forgotOtpCode.length !== 6} style={{ width: '100%', marginTop: '10px', padding: '11px', borderRadius: '12px', border: '1px solid #cbd5e1', background: '#f8fafc', color: '#0f172a', fontWeight: 700, cursor: forgotBusy || forgotOtpCode.length !== 6 ? 'not-allowed' : 'pointer' }}>
-                  {forgotBusy ? 'Verifying…' : 'Verify OTP'}
-                </button>
-              </div>
-            ) : null}
-
-            {forgotError ? <div style={{ marginTop: '10px', color: '#b91c1c', fontSize: '13px', fontWeight: 600 }}>{forgotError}</div> : null}
-            {forgotStatus ? <div style={{ marginTop: '8px', color: '#0f766e', fontSize: '12px' }}>{forgotStatus}</div> : null}
-          </div>
-        </div>
-      ) : null}
+      <div style={{ textAlign: 'center' }}>
+        <div style={{ fontSize: '13px', color: '#334155', marginBottom: '4px', fontWeight: 700 }}>ClockChat: Encrypted by Kript Engine</div>
+        <div style={{ fontSize: '14px', color: '#334155', letterSpacing: '0.12em', fontWeight: 800 }}>From Kript Labs</div>
+      </div>
 
       <LegalDocumentModal open={Boolean(legalModal)} type={legalModal ?? 'terms'} onClose={() => setLegalModal(null)} />
     </div>

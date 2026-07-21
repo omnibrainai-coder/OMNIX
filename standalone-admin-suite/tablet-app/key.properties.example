@@ -1,0 +1,4 @@
+storeFile=../../../keystore/omnix-admin-tablet.jks
+storePassword=CHANGE_ME
+keyAlias=omnix_admin_tablet
+keyPassword=CHANGE_ME

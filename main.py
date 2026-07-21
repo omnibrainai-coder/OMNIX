@@ -26,6 +26,7 @@ from backend.routes.billing import router as billing_router
 from backend.routes.push_notifications import router as push_notifications_router
 from backend.services.push_notifications import PushNotificationError, push_notification_service
 from backend.routes.zero_knowledge import router as zero_knowledge_router
+from backend.routes.admin_oob_auth import router as admin_oob_auth_router
 
 app = FastAPI(
     title="OMNIX",
@@ -39,6 +40,7 @@ app.include_router(settings_management_router)
 app.include_router(billing_router)
 app.include_router(push_notifications_router)
 app.include_router(zero_knowledge_router)
+app.include_router(admin_oob_auth_router)
 
 limiter = Limiter(key_func=get_remote_address)
 app.state.limiter = limiter
@@ -473,12 +475,6 @@ in_memory_stories: List[dict] = [
 
 post_interaction_events: List[dict] = []
 
-admin_users_state: List[dict] = [
-    {'id': 1, 'username': 'operator_bite', 'status': 'active', 'last_seen': '2m ago'},
-    {'id': 2, 'username': 'nova_ai', 'status': 'active', 'last_seen': '8m ago'},
-    {'id': 3, 'username': 'shadow_dev', 'status': 'blocked', 'last_seen': '22m ago'},
-]
-
 admin_logs_state: List[dict] = [
     {'id': 1, 'level': 'INFO', 'message': 'Secure feed sync completed', 'time': '2m ago'},
     {'id': 2, 'level': 'WARN', 'message': 'Private visibility filter toggled', 'time': '9m ago'},
@@ -502,19 +498,6 @@ def add_admin_log(level: str, message: str) -> None:
     }
     admin_logs_state.insert(0, entry)
     admin_logs_state[:] = admin_logs_state[:8]
-
-
-def get_admin_metrics() -> dict:
-    return {
-        'active_users': sum(1 for user in admin_users_state if user.get('status') == 'active'),
-        'active_sessions': sum(1 for user in admin_users_state if user.get('status') in {'active', 'idle'}),
-        'posts_count': len(in_memory_posts),
-        'stories_count': len(in_memory_stories),
-        'logs_count': len(admin_logs_state),
-        'system_cpu_percent': 21,
-        'system_memory_percent': 48,
-        'database_status': 'connected_local' if not SUPABASE_URL else 'connected_supabase',
-    }
 
 
 def prune_expired_stories() -> None:
@@ -546,6 +529,45 @@ def normalize_username(username: str) -> str:
 
 def refresh_identity_registry() -> None:
     auth_identity_registry["usernames"] = {normalize_username(user.get("username", "")) for user in social_graph.users.values() if user.get("username")}
+
+
+def is_username_conflict_error(detail: str) -> bool:
+    normalized_detail = (detail or "").lower()
+    return (
+        "username already taken" in normalized_detail
+        or "username is already taken" in normalized_detail
+        or "profiles_username_canonical_unique_idx" in normalized_detail
+        or "duplicate key value violates unique constraint" in normalized_detail and "username" in normalized_detail
+    )
+
+
+async def find_existing_username_profile(username: str) -> Optional[Dict[str, Any]]:
+    normalized_username = normalize_username(username)
+    if not normalized_username:
+        return None
+
+    if SUPABASE_URL and SUPABASE_SERVICE_KEY:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            for field_name in ("username_canonical", "username"):
+                response = await client.get(
+                    f"{SUPABASE_URL}/rest/v1/profiles",
+                    headers=get_supabase_headers(use_service_key=True),
+                    params={
+                        "select": "id,user_id,username",
+                        field_name: f"eq.{normalized_username}",
+                        "limit": "1",
+                    },
+                )
+                if response.status_code >= 400:
+                    continue
+                rows = response.json()
+                if isinstance(rows, list) and rows:
+                    return rows[0]
+
+    if normalized_username in auth_identity_registry["usernames"]:
+        return {"username": normalized_username}
+
+    return None
 
 
 def prune_expired_otp_challenges() -> None:
@@ -1025,8 +1047,9 @@ async def api_signup(request: Request, req: SignupRequest):
     refresh_identity_registry()
 
     normalized_username = normalize_username(req.username)
-    if normalized_username in auth_identity_registry["usernames"]:
-        raise HTTPException(status_code=409, detail="Username is already taken")
+    existing_username_profile = await find_existing_username_profile(normalized_username)
+    if existing_username_profile:
+        raise HTTPException(status_code=409, detail="Username already taken")
 
     normalized_email = req.email.strip().lower()
     if normalized_email in auth_identity_registry["emails"]:
@@ -1045,19 +1068,24 @@ async def api_signup(request: Request, req: SignupRequest):
         challenge = otp_challenges.get(req.otp_challenge_id or "")
         if not challenge or challenge["phone"] != normalized_phone or not challenge.get("verified"):
             raise HTTPException(status_code=400, detail="Phone verification is required before signup")
-    result = await supabase_auth_request("signup", {
-        "email": normalized_email,
-        "password": req.password,
-        "data": {
-            "username": normalized_username,
-            "full_name": f"{req.first_name} {req.last_name}".strip(),
-            "display_nickname": (req.display_nickname or "").strip(),
-            "mobile": normalized_phone or req.mobile or "",
-            "phone_country_code": req.phone_country_code or "+1",
-            "terms_accepted": bool(req.legal_accepted),
-            "privacy_accepted": bool(req.legal_accepted),
-        },
-    })
+    try:
+        result = await supabase_auth_request("signup", {
+            "email": normalized_email,
+            "password": req.password,
+            "data": {
+                "username": normalized_username,
+                "full_name": f"{req.first_name} {req.last_name}".strip(),
+                "display_nickname": (req.display_nickname or "").strip(),
+                "mobile": normalized_phone or req.mobile or "",
+                "phone_country_code": req.phone_country_code or "+1",
+                "terms_accepted": bool(req.legal_accepted),
+                "privacy_accepted": bool(req.legal_accepted),
+            },
+        })
+    except HTTPException as error:
+        if is_username_conflict_error(str(error.detail)):
+            raise HTTPException(status_code=409, detail="Username already taken") from error
+        raise
 
     auth_identity_registry["usernames"].add(normalized_username)
     auth_identity_registry["emails"].add(normalized_email)
@@ -1157,7 +1185,7 @@ async def api_check_auth_availability(request: Request, req: AvailabilityRequest
     refresh_identity_registry()
     normalized_username = normalize_username(req.username)
     normalized_email = req.email.strip().lower()
-    username_available = normalized_username not in auth_identity_registry["usernames"]
+    username_available = await find_existing_username_profile(normalized_username) is None
     email_available = normalized_email not in auth_identity_registry["emails"]
     return {
         "success": True,
@@ -1261,86 +1289,6 @@ async def google_oauth_redirect():
 
     redirect_url = f"{SUPABASE_URL}/auth/v1/authorize?provider=google&redirect_to={os.getenv('FRONTEND_URL', 'http://localhost')}/auth/callback"
     return {"redirect_url": redirect_url}
-
-
-# Admin / Dashboard API Routes
-@app.get("/api/admin/metrics")
-async def admin_metrics():
-    """Return aggregate admin metrics for the dashboard."""
-    prune_expired_stories()
-    return {"success": True, "metrics": get_admin_metrics()}
-
-
-@app.get("/api/admin/users")
-async def admin_users():
-    """Return a lightweight list of users for the admin dashboard."""
-    return {"success": True, "users": admin_users_state}
-
-
-@app.post("/api/admin/users/{user_id}/block")
-async def block_admin_user(user_id: int):
-    """Block a user from the admin dashboard."""
-    user = next((item for item in admin_users_state if item["id"] == user_id), None)
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if user["status"] != "blocked":
-        user["status"] = "blocked"
-        user["last_seen"] = "blocked now"
-        add_admin_log("WARN", f"User {user['username']} blocked")
-
-    return {"success": True, "message": "User blocked", "user": user}
-
-
-@app.post("/api/admin/users/{user_id}/unblock")
-async def unblock_admin_user(user_id: int):
-    """Unblock a user from the admin dashboard."""
-    user = next((item for item in admin_users_state if item["id"] == user_id), None)
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-
-    if user["status"] != "active":
-        user["status"] = "active"
-        user["last_seen"] = "restored now"
-        add_admin_log("INFO", f"User {user['username']} unblocked")
-
-    return {"success": True, "message": "User unblocked", "user": user}
-
-
-@app.get("/api/admin/posts")
-async def admin_posts():
-    """Return posts for moderation in the admin dashboard."""
-    return {"success": True, "posts": in_memory_posts}
-
-
-@app.post("/api/admin/posts/{post_id}/approve")
-async def approve_admin_post(post_id: str):
-    """Approve a post in the moderation queue."""
-    post = next((item for item in in_memory_posts if item["id"] == post_id), None)
-    if post is None:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    post["approved"] = True
-    add_admin_log("INFO", f"Post {post_id} approved")
-    return {"success": True, "message": "Post approved", "post": post}
-
-
-@app.delete("/api/admin/posts/{post_id}")
-async def delete_admin_post(post_id: str):
-    """Delete a post from the moderation queue."""
-    post = next((item for item in in_memory_posts if item["id"] == post_id), None)
-    if post is None:
-        raise HTTPException(status_code=404, detail="Post not found")
-
-    in_memory_posts[:] = [item for item in in_memory_posts if item["id"] != post_id]
-    add_admin_log("WARN", f"Post {post_id} removed from moderation queue")
-    return {"success": True, "message": "Post deleted"}
-
-
-@app.get("/api/admin/logs")
-async def admin_logs():
-    """Return recent system logs for the admin dashboard."""
-    return {"success": True, "logs": admin_logs_state}
 
 
 @app.get("/api/stories/feed")

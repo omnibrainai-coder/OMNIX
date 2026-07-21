@@ -207,5 +207,37 @@ class PushNotificationService:
         }
         return await self._send_message(recipient_user_id, message, event_name)
 
+    async def send_admin_authorization_prompt(
+        self,
+        recipient_user_id: str,
+        challenge_id: str,
+        tablet_android_id: str,
+        hotspot_ssid: str,
+        gateway_ip: str,
+    ) -> Dict[str, Any]:
+        message = {
+            "android": {
+                "priority": "high",
+                "notification": {
+                    "channel_id": "security",
+                    "click_action": "OPEN_ADMIN_AUTH",
+                },
+            },
+            "notification": {
+                "title": "Hey Affan!",
+                "body": "Are you trying to open Admin Dashboard?",
+            },
+            "data": {
+                "notificationType": "admin_auth_prompt",
+                "challengeId": challenge_id,
+                "tabletAndroidId": tablet_android_id,
+                "hotspotSsid": hotspot_ssid,
+                "gatewayIp": gateway_ip,
+                "yesAction": "YES",
+                "noAction": "NO",
+            },
+        }
+        return await self._send_message(recipient_user_id, message, "admin_auth_prompt")
+
 
 push_notification_service = PushNotificationService()
