@@ -4,6 +4,7 @@ import { HomeFeed } from '../components/ui/HomeFeed';
 import { Reels } from '../components/ui/Reels';
 import { Profile } from '../components/ui/Profile';
 import { ChatSystem } from '../components/ui/ChatSystem';
+import { AdminDashboard } from '../components/ui/AdminDashboard';
 
 export function AuthContainer() {
   const [screen, setScreen] = useState<'login' | 'signup' | 'dashboard'>('login');
@@ -87,12 +88,20 @@ export function AuthContainer() {
         {activeTab === 'reels' && <Reels />}
 
         {activeTab === 'profile' && (
-          <Profile username={targetUsername} onLogout={() => setScreen('login')} />
+          <div style={{ flex: 1 }}>
+            <AdminDashboard />
+          </div>
         )}
 
         {/* MESSAGES TAB SWITCH SYSTEM OVERLAY */}
         {activeTab === 'messages' && (
           <ChatSystem onBack={() => setActiveTab('home')} />
+        )}
+
+        {activeTab === 'profile' && (
+          <div style={{ flex: 1 }}>
+            <AdminDashboard />
+          </div>
         )}
 
         {/* --- CLEAN RE-ENGINEERED INSTAGRAM BAR PLATFORM BOTTOM NAVIGATION --- */}

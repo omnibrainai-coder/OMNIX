@@ -14,6 +14,8 @@ from slowapi import Limiter, _rate_limit_exceeded_handler
 from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 from typing import Optional
+from datetime import datetime, timezone
+import json
 import re
 
 app = FastAPI(
@@ -50,6 +52,14 @@ if os.path.exists("static"):
 SUPABASE_URL = os.getenv("SUPABASE_URL") or os.getenv("VITE_SUPABASE_URL", "")
 SUPABASE_ANON_KEY = os.getenv("SUPABASE_ANON_KEY") or os.getenv("VITE_SUPABASE_ANON_KEY", "")
 SUPABASE_SERVICE_KEY = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+
+FLAG_KEYWORDS = {
+    "spam", "scam", "phishing", "fraud", "hate", "violence", "abuse", "harassment",
+    "explicit", "sexual", "self-harm", "weapon", "bomb", "terror"
+}
+ACTION_KEYWORDS = {
+    "spam", "scam", "abuse", "harass", "impersonation", "fraud"
+}
 
 
 def get_supabase_headers(use_service_key: bool = False) -> dict:
@@ -114,6 +124,109 @@ async def supabase_db_request(method: str, table: str, payload: dict = None, que
         return response.json()
 
 
+def _parse_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse an ISO timestamp and return a timezone-aware datetime."""
+    if not value:
+        return None
+
+    try:
+        normalized = str(value).replace("Z", "+00:00")
+        parsed = datetime.fromisoformat(normalized)
+        if parsed.tzinfo is None:
+            return parsed.replace(tzinfo=timezone.utc)
+        return parsed
+    except ValueError:
+        return None
+
+
+def auto_flag_content(content: str, action: Optional[str] = None) -> dict:
+    """Evaluate text and user action to decide whether content should be flagged."""
+    normalized_text = (content or "").lower()
+    normalized_action = (action or "").lower()
+    reasons = []
+
+    matched_keywords = [keyword for keyword in FLAG_KEYWORDS if keyword in normalized_text]
+    if matched_keywords:
+        reasons.append("keyword")
+
+    action_matches = [keyword for keyword in ACTION_KEYWORDS if keyword in normalized_action]
+    if action_matches:
+        reasons.append("action")
+
+    flagged = bool(reasons)
+    if flagged and ("spam" in matched_keywords or "spam" in action_matches or "scam" in matched_keywords or "scam" in action_matches):
+        severity = "high"
+    elif flagged:
+        severity = "medium"
+    else:
+        severity = "none"
+
+    return {
+        "flagged": flagged,
+        "reasons": reasons,
+        "severity": severity,
+    }
+
+
+def rank_posts_for_feed(posts: list[dict]) -> list[dict]:
+    """Rank posts by engagement and recency while filtering out likely flagged content."""
+    ranked = []
+    now = datetime.now(timezone.utc)
+
+    for post in posts or []:
+        if not isinstance(post, dict):
+            continue
+
+        moderation = auto_flag_content(post.get("content") or "", post.get("action") or "")
+        if moderation["flagged"]:
+            continue
+
+        likes = int(post.get("likes") or 0)
+        comments = int(post.get("comments") or 0)
+        shares = int(post.get("shares") or 0)
+        created_at = _parse_datetime(post.get("created_at"))
+
+        if created_at is None:
+            age_hours = 72
+        else:
+            age_hours = max(0.0, (now - created_at).total_seconds() / 3600)
+
+        recency_boost = max(0.0, (48 - age_hours) / 48) * 5
+        score = likes * 2 + comments * 4 + shares * 6 + recency_boost
+        ranked.append({"post": post, "score": score})
+
+    ranked.sort(key=lambda item: (-item["score"], item["post"].get("created_at") or ""))
+    return [item["post"] for item in ranked]
+
+
+def verify_admin_request(authorization: Optional[str], role: Optional[str] = None, x_role: Optional[str] = None) -> bool:
+    """Validate that an admin-only request is coming from an authorized role."""
+    if not authorization or not authorization.startswith("Bearer "):
+        raise HTTPException(status_code=401, detail="Not authenticated")
+
+    normalized_role = (role or x_role or "").lower()
+    if normalized_role != "admin":
+        raise HTTPException(status_code=403, detail="Admin role required")
+
+    return True
+
+
+def trigger_signup_notification_webhook(payload: dict) -> dict:
+    """Prepare a lightweight webhook payload for phone notification dispatch."""
+    username = (payload or {}).get("username") or "unknown"
+    email = (payload or {}).get("email") or ""
+    return {
+        "status": "queued",
+        "channel": "phone",
+        "recipient": email or f"{username}@register",
+        "message": f"Welcome {username}! Your OMNIX account is ready.",
+        "metadata": {
+            "source": "signup-webhook",
+            "payload": json.dumps(payload, sort_keys=True),
+        },
+    }
+
+
 # Request Models with Validation
 class LoginRequest(BaseModel):
     identity: str
@@ -152,6 +265,11 @@ class ForgotPasswordRequest(BaseModel):
 class PostRequest(BaseModel):
     content: str
     image_url: Optional[str] = None
+
+
+class ModerationRequest(BaseModel):
+    content: str
+    action: Optional[str] = None
 
 
 # Page Routes
@@ -238,7 +356,7 @@ async def api_login(request: Request, req: LoginRequest):
 @app.post("/api/auth/signup")
 @limiter.limit("3/minute")
 async def api_signup(request: Request, req: SignupRequest):
-    """Register new user via Supabase Auth."""
+    """Register new user via Supabase Auth and prepare a notification webhook."""
     result = await supabase_auth_request("signup", {
         "email": req.email,
         "password": req.password,
@@ -249,10 +367,17 @@ async def api_signup(request: Request, req: SignupRequest):
         },
     })
 
+    webhook_payload = trigger_signup_notification_webhook({
+        "username": req.username,
+        "email": req.email,
+        "mobile": req.mobile or "",
+    })
+
     return {
         "success": True,
         "user_id": result.get("id", ""),
         "message": "Account created successfully. Please check your email for verification.",
+        "notification_webhook": webhook_payload,
     }
 
 
@@ -321,20 +446,46 @@ async def google_oauth_redirect():
 @app.post("/api/posts")
 async def create_post(req: PostRequest, authorization: Optional[str] = None):
     """Create a new post."""
+    moderation = auto_flag_content(req.content)
     data = {
         "content": req.content,
         "image_url": req.image_url,
     }
     result = await supabase_db_request("POST", "posts", data)
-    return {"success": True, "message": "Post created successfully", "data": result}
+    return {
+        "success": True,
+        "message": "Post created successfully",
+        "data": result,
+        "moderation": moderation,
+    }
 
 
 @app.get("/api/posts/feed")
 async def get_feed(limit: int = 20, offset: int = 0):
-    """Get posts feed."""
-    query = f"?select=*&order=created_at.desc&limit={limit}&offset={offset}"
+    """Get posts feed ranked by engagement and recency."""
+    requested_limit = max(1, min(int(limit), 100))
+    requested_offset = max(0, int(offset))
+    fetch_limit = min(requested_offset + requested_limit * 4 + 20, 200)
+
+    query = f"?select=id,content,likes,comments,shares,created_at&order=created_at.desc&limit={fetch_limit}&offset={requested_offset}"
     result = await supabase_db_request("GET", "posts", query=query)
-    return {"success": True, "posts": result}
+    ranked_posts = rank_posts_for_feed(result)
+    paged_posts = ranked_posts[requested_offset:requested_offset + requested_limit]
+
+    return {"success": True, "posts": paged_posts}
+
+
+@app.post("/api/admin/moderation/flag")
+async def flag_content_for_review(request: Request, req: ModerationRequest):
+    """Process reported text or actions for automatic moderation review."""
+    verify_admin_request(request.headers.get("authorization"), x_role=request.headers.get("x-role"))
+    moderation = auto_flag_content(req.content, action=req.action)
+    return {
+        "success": True,
+        "flagged": moderation["flagged"],
+        "severity": moderation["severity"],
+        "reasons": moderation["reasons"],
+    }
 
 
 @app.get("/api/posts/{post_id}")
